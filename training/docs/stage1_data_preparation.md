@@ -11,40 +11,112 @@
 完成本阶段后，你需要有：
 - [ ] 裁剪好的飞机图片（每张图只有飞机主体）
 - [ ] 完整的标注 CSV 文件
+- [ ] 注册号区域标注文件（YOLO 格式 txt）
 - [ ] 类别映射 JSON 文件
 - [ ] 数据质量验证通过
 
 ---
 
-## 第一步：理解你的数据
+## 第一步：理解你的数据格式
 
-### 1.1 你的标注字段
+### 1.1 标注文件结构
 
-根据你的数据格式，标注文件包含以下字段：
+你的标注数据由**两部分**组成：
+
+```
+training/data/labels/
+├── aircraft_labels.csv          # 主标注文件
+├── type_classes.json            # 机型类别映射
+├── airline_classes.json         # 航司类别映射
+└── registration/                # 注册号区域标注
+    ├── IMG_0001.txt
+    ├── IMG_0002.txt
+    └── ...
+```
+
+### 1.2 主标注文件 (CSV)
+
+**文件**：`aircraft_labels.csv`
 
 ```csv
 filename,typeid,typename,airlineid,airlinename,clarity,block,registration
+IMG_0001.jpg,0,A320,1,China Eastern,0.95,0.0,B-1234
+IMG_0002.jpg,1,B737-800,0,Air China,0.80,0.15,B-5678
+IMG_0003.jpg,7,A380,8,Emirates,0.70,0.40,
+IMG_0004.jpg,4,B787-9,3,Hainan Airlines,0.50,0.60,
 ```
 
-| 字段 | 含义 | 用途 |
-|------|------|------|
-| `filename` | 图片文件名 | 找到图片 |
-| `typeid` | 机型编号 | 分类标签（自动生成） |
-| `typename` | 机型名称 | 如 A320、B737-800 |
-| `airlineid` | 航司编号 | 分类标签（自动生成） |
-| `airlinename` | 航司名称 | 如 China Eastern |
-| `clarity` | 清晰度 0-1 | 回归任务（1=最清晰） |
-| `block` | 遮挡程度 0-1 | 回归任务（0=无遮挡，1=完全遮挡） |
-| `registration` | 注册号 | OCR 任务 |
+**字段说明**：
 
-### 1.2 数据来源建议
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `filename` | string | ✅ | 图片文件名 |
+| `typeid` | int | ❌ | 机型编号（可自动生成） |
+| `typename` | string | ✅ | 机型名称，如 `A320`、`B737-800` |
+| `airlineid` | int | ❌ | 航司编号（可自动生成） |
+| `airlinename` | string | ❌ | 航司名称，如 `China Eastern` |
+| `clarity` | float | ✅ | 清晰度 0.0-1.0（1.0=最清晰，0.0=最模糊） |
+| `block` | float | ✅ | 遮挡程度 0.0-1.0（0.0=无遮挡，1.0=完全遮挡） |
+| `registration` | string | ❌ | 注册号文字，如 `B-1234`，看不清则留空 |
 
-| 来源 | 网址 | 优点 | 注意事项 |
-|------|------|------|----------|
-| JetPhotos | jetphotos.com | 高质量、有机型标注 | 需遵守版权 |
-| Planespotters | planespotters.net | 注册号数据丰富 | 需遵守版权 |
-| Flickr | flickr.com | 量大 | 需筛选质量 |
-| 自己拍摄 | - | 无版权问题 | 数量有限 |
+### 1.3 注册号区域标注 (YOLO 格式 txt)
+
+**目录**：`registration/`  
+**文件命名**：与图片同名，扩展名改为 `.txt`
+
+```
+图片: training/data/processed/aircraft_crop/unsorted/IMG_0001.jpg
+标注: training/data/labels/registration/IMG_0001.txt
+```
+
+**文件内容格式（YOLO 格式）**：
+
+```
+class_id x_center y_center width height
+```
+
+**示例**：
+```
+# IMG_0001.txt - 单个注册号
+0 0.85 0.65 0.12 0.04
+
+# IMG_0005.txt - 多个注册号（机身有多处）
+0 0.25 0.55 0.10 0.03
+0 0.82 0.48 0.08 0.025
+```
+
+**字段详解**：
+
+| 字段 | 含义 | 范围 | 说明 |
+|------|------|------|------|
+| `class_id` | 类别ID | 0 | 固定为 0（只有一个类：registration） |
+| `x_center` | 框中心 X | 0.0-1.0 | 相对于图片宽度的归一化值 |
+| `y_center` | 框中心 Y | 0.0-1.0 | 相对于图片高度的归一化值 |
+| `width` | 框宽度 | 0.0-1.0 | 相对于图片宽度的归一化值 |
+| `height` | 框高度 | 0.0-1.0 | 相对于图片高度的归一化值 |
+
+**坐标计算示例**：
+
+```
+假设图片尺寸: 1000 x 600 像素
+注册号区域像素坐标: 左上(800, 360), 右下(920, 384)
+
+计算过程：
+- 框宽度 = 920 - 800 = 120 像素
+- 框高度 = 384 - 360 = 24 像素
+- x_center = (800 + 120/2) / 1000 = 0.86
+- y_center = (360 + 24/2) / 600 = 0.62
+- width = 120 / 1000 = 0.12
+- height = 24 / 600 = 0.04
+
+txt 文件内容:
+0 0.86 0.62 0.12 0.04
+```
+
+**重要规则**：
+- ⚠️ 如果图片中注册号**不可见**，则**不创建**对应的 `.txt` 文件
+- ⚠️ 注册号的**文字内容**存在 CSV 的 `registration` 列，不是 txt 文件中
+- ⚠️ txt 文件只存储**位置信息**，用于训练检测模型
 
 ---
 
@@ -186,9 +258,9 @@ def crop_aircraft(
 
 if __name__ == "__main__":
     crop_aircraft(
-        input_dir="../data/raw",
-        output_dir="../data/processed/aircraft_crop/unsorted",
-        conf_threshold=0.7,
+        input_dir="training/data/raw",
+        output_dir="training/data/processed/aircraft_crop/unsorted",
+        conf_threshold=0.5,
         padding=0.1
     )
 ```
@@ -257,20 +329,41 @@ if __name__ == "__main__":
 
 ## 第三步：数据标注
 
-### 3.1 标注策略
+### 3.1 标注工作流程
 
-你需要标注的字段：
-
-| 字段 | 优先级 | 标注难度 | 说明 |
-|------|--------|----------|------|
-| `typename` | P0 | 中 | 需要航空知识 |
-| `clarity` | P0 | 低 | 主观判断 0-1 |
-| `block` | P0 | 低 | 遮挡程度 0-1 |
-| `airlinename` | P1 | 低 | 看涂装 |
-| `registration` | P2 | 中 | 需要看清字符 |
-| `registrationarea` | P2 | 中 | 画框 |
+```
+裁剪后的图片
+      │
+      ▼
+┌─────────────────────────────────────────────────────┐
+│  标注工具（Label Studio / 自定义工具）                │
+│                                                     │
+│  对每张图片标注：                                    │
+│  ├── typename (必填) - 选择机型                     │
+│  ├── airlinename - 选择航司                         │
+│  ├── clarity (必填) - 滑块选择 0-1                  │
+│  ├── block (必填) - 滑块选择 0-1                    │
+│  ├── registration - 输入注册号文字（看不清留空）      │
+│  └── 注册号区域 - 画框标注位置（看不清不画）          │
+└─────────────────────────────────────────────────────┘
+      │
+      ▼
+┌─────────────────────────────────────────────────────┐
+│  导出为：                                            │
+│  ├── aircraft_labels.csv (主标注)                   │
+│  └── registration/*.txt (注册号区域，YOLO格式)       │
+└─────────────────────────────────────────────────────┘
+```
 
 ### 3.2 标注规范
+
+#### typename（机型）标注规范
+
+| 规则 | 说明 | 示例 |
+|------|------|------|
+| 使用标准简写 | ICAO 代码简写 | A320, B737-800 |
+| 区分子型号 | 不同型号分开 | A320 ≠ A321, B737-800 ≠ B737-900 |
+| 不确定标 Unknown | 宁缺毋滥 | Unknown |
 
 #### clarity（清晰度）评分标准
 
@@ -292,7 +385,16 @@ if __name__ == "__main__":
 | 0.5-0.7 | 明显遮挡 | 约一半被遮挡 |
 | 0.7-1.0 | 严重遮挡 | 大部分被遮挡，难以辨认 |
 
-### 3.3 使用 Label Studio 标注（推荐）
+#### registration（注册号）标注规范
+
+| 规则 | 说明 |
+|------|------|
+| 全大写 | `B-1234` 不是 `b-1234` |
+| 保留连字符 | `B-1234` 不是 `B1234` |
+| 看不清留空 | 不要猜测 |
+| 多个注册号 | 只填最清晰的那个 |
+
+### 3.3 使用 Label Studio 标注
 
 **安装：**
 ```bash
@@ -308,11 +410,18 @@ label-studio start --port 8080
   <!-- 机型分类 -->
   <Header value="机型 Aircraft Type"/>
   <Choices name="typename" toName="image" choice="single" required="true">
-    <Choice value="A320"/><Choice value="A321"/>
-    <Choice value="A330-300"/><Choice value="A350-900"/><Choice value="A380"/>
-    <Choice value="B737-800"/><Choice value="B737-MAX8"/>
-    <Choice value="B747-400"/><Choice value="B777-300ER"/><Choice value="B787-9"/>
+    <Choice value="A319"/><Choice value="A320"/><Choice value="A321"/>
+    <Choice value="A330-200"/><Choice value="A330-300"/>
+    <Choice value="A350-900"/><Choice value="A350-1000"/>
+    <Choice value="A380"/>
+    <Choice value="B737-700"/><Choice value="B737-800"/><Choice value="B737-900"/>
+    <Choice value="B737-MAX8"/><Choice value="B737-MAX9"/>
+    <Choice value="B747-400"/><Choice value="B747-8"/>
+    <Choice value="B777-200"/><Choice value="B777-300ER"/>
+    <Choice value="B787-8"/><Choice value="B787-9"/><Choice value="B787-10"/>
     <Choice value="ARJ21"/><Choice value="C919"/>
+    <Choice value="E190"/><Choice value="E195"/>
+    <Choice value="CRJ900"/>
     <Choice value="Unknown"/>
   </Choices>
   
@@ -321,26 +430,30 @@ label-studio start --port 8080
   <Choices name="airlinename" toName="image" choice="single">
     <Choice value="Air China"/><Choice value="China Eastern"/>
     <Choice value="China Southern"/><Choice value="Hainan Airlines"/>
-    <Choice value="Xiamen Airlines"/><Choice value="Spring Airlines"/>
-    <Choice value="Cathay Pacific"/><Choice value="Other"/><Choice value="Unknown"/>
+    <Choice value="Xiamen Airlines"/><Choice value="Shenzhen Airlines"/>
+    <Choice value="Sichuan Airlines"/><Choice value="Spring Airlines"/>
+    <Choice value="Juneyao Airlines"/><Choice value="China United"/>
+    <Choice value="Cathay Pacific"/><Choice value="EVA Air"/>
+    <Choice value="Singapore Airlines"/><Choice value="Emirates"/>
+    <Choice value="Other"/><Choice value="Unknown"/>
   </Choices>
   
   <!-- 清晰度 -->
-  <Header value="清晰度 Clarity (1=清晰, 10=模糊)"/>
-  <Rating name="clarity" toName="image" maxRating="10"/>
+  <Header value="清晰度 Clarity (1=最清晰, 10=最模糊)"/>
+  <Rating name="clarity_rating" toName="image" maxRating="10"/>
   
   <!-- 遮挡程度 -->
   <Header value="遮挡程度 Block (1=无遮挡, 10=完全遮挡)"/>
-  <Rating name="block" toName="image" maxRating="10"/>
+  <Rating name="block_rating" toName="image" maxRating="10"/>
   
-  <!-- 注册号 -->
-  <Header value="注册号 Registration"/>
-  <TextArea name="registration" toName="image" placeholder="B-1234"/>
+  <!-- 注册号文字 -->
+  <Header value="注册号 Registration (看不清留空)"/>
+  <TextArea name="registration" toName="image" placeholder="B-1234" maxSubmissions="1"/>
   
-  <!-- 注册号区域 -->
-  <Header value="注册号区域"/>
-  <RectangleLabels name="registrationarea" toName="image">
-    <Label value="reg" background="#FF0000"/>
+  <!-- 注册号区域框 -->
+  <Header value="注册号区域 (看不清不画)"/>
+  <RectangleLabels name="registration_bbox" toName="image">
+    <Label value="registration" background="#FF0000"/>
   </RectangleLabels>
 </View>
 ```
@@ -356,13 +469,25 @@ import pandas as pd
 from pathlib import Path
 
 def convert_export(export_json: str, output_dir: str):
-    """转换 Label Studio JSON 导出"""
+    """
+    转换 Label Studio JSON 导出为训练格式
+    
+    输出:
+    - aircraft_labels.csv (主标注)
+    - registration/*.txt (注册号区域，YOLO格式)
+    - type_classes.json (机型类别映射)
+    - airline_classes.json (航司类别映射)
+    """
     
     with open(export_json, 'r', encoding='utf-8') as f:
         data = json.load(f)
     
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
+    
+    # 创建注册号区域目录
+    reg_dir = output_path / 'registration'
+    reg_dir.mkdir(exist_ok=True)
     
     records = []
     
@@ -376,42 +501,71 @@ def convert_export(export_json: str, output_dir: str):
             'airlinename': '',
             'clarity': 1.0,
             'block': 0.0,
-            'registration': '',
-            'registrationarea': ''
+            'registration': ''
         }
         
+        bboxes = []
+        
         for r in results:
-            if r['type'] == 'choices':
-                if r['from_name'] == 'typename':
-                    record['typename'] = r['value']['choices'][0]
-                elif r['from_name'] == 'airlinename':
-                    record['airlinename'] = r['value']['choices'][0] if r['value']['choices'] else ''
-            elif r['type'] == 'rating':
-                if r['from_name'] == 'clarity':
-                    # Label Studio 评分是 1-10，转换为 0-1（反转，因为 1=清晰）
-                    record['clarity'] = 1.0 - (r['value']['rating'] - 1) / 9.0
-                elif r['from_name'] == 'block':
+            rtype = r.get('type', '')
+            from_name = r.get('from_name', '')
+            
+            if rtype == 'choices':
+                if from_name == 'typename':
+                    choices = r.get('value', {}).get('choices', [])
+                    record['typename'] = choices[0] if choices else ''
+                elif from_name == 'airlinename':
+                    choices = r.get('value', {}).get('choices', [])
+                    record['airlinename'] = choices[0] if choices else ''
+            
+            elif rtype == 'rating':
+                rating = r.get('value', {}).get('rating', 5)
+                if from_name == 'clarity_rating':
+                    # 1=最清晰 → 1.0, 10=最模糊 → 0.0
+                    record['clarity'] = 1.0 - (rating - 1) / 9.0
+                elif from_name == 'block_rating':
                     # 1=无遮挡 → 0.0, 10=完全遮挡 → 1.0
-                    record['block'] = (r['value']['rating'] - 1) / 9.0
-            elif r['type'] == 'textarea' and r['from_name'] == 'registration':
-                text = r['value']['text'][0] if r['value']['text'] else ''
+                    record['block'] = (rating - 1) / 9.0
+            
+            elif rtype == 'textarea' and from_name == 'registration':
+                text_list = r.get('value', {}).get('text', [])
+                text = text_list[0] if text_list else ''
                 record['registration'] = text.upper().replace(' ', '')
-            elif r['type'] == 'rectanglelabels':
-                # 转换为 YOLO 格式: x_center y_center width height (归一化)
-                x = r['value']['x'] / 100
-                y = r['value']['y'] / 100
-                w = r['value']['width'] / 100
-                h = r['value']['height'] / 100
-                record['registrationarea'] = f"{x + w/2:.4f} {y + h/2:.4f} {w:.4f} {h:.4f}"
+            
+            elif rtype == 'rectanglelabels' and from_name == 'registration_bbox':
+                # 提取边界框
+                value = r.get('value', {})
+                x = value.get('x', 0) / 100  # Label Studio 用百分比
+                y = value.get('y', 0) / 100
+                w = value.get('width', 0) / 100
+                h = value.get('height', 0) / 100
+                
+                # 转换为 YOLO 格式 (中心点)
+                x_center = x + w / 2
+                y_center = y + h / 2
+                
+                bboxes.append(f"0 {x_center:.6f} {y_center:.6f} {w:.6f} {h:.6f}")
         
         records.append(record)
+        
+        # 保存注册号区域 txt 文件（如果有标注）
+        if bboxes:
+            txt_filename = Path(filename).stem + '.txt'
+            txt_path = reg_dir / txt_filename
+            txt_path.write_text('\n'.join(bboxes))
     
     # 创建 DataFrame
     df = pd.DataFrame(records)
     
-    # 生成 ID
-    types = sorted(df['typename'].dropna().unique().tolist())
-    airlines = sorted(df['airlinename'].dropna().unique().tolist())
+    # 生成类别 ID
+    types = sorted([t for t in df['typename'].unique() if t and t != 'Unknown'])
+    airlines = sorted([a for a in df['airlinename'].unique() if a and a != 'Unknown'])
+    
+    # 确保 Unknown 在最后
+    if 'Unknown' in df['typename'].values:
+        types.append('Unknown')
+    if 'Unknown' in df['airlinename'].values:
+        airlines.append('Unknown')
     
     type_to_id = {t: i for i, t in enumerate(types)}
     airline_to_id = {a: i for i, a in enumerate(airlines)}
@@ -419,11 +573,10 @@ def convert_export(export_json: str, output_dir: str):
     df['typeid'] = df['typename'].map(type_to_id)
     df['airlineid'] = df['airlinename'].map(airline_to_id)
     
-    # 重新排列列
+    # 重新排列列顺序
     columns = ['filename', 'typeid', 'typename', 'airlineid', 'airlinename', 
-               'clarity', 'block', 'registration', 'airplanearea', 'registrationarea']
-    df['airplanearea'] = ''  # 如果没有这个字段
-    df = df[[c for c in columns if c in df.columns]]
+               'clarity', 'block', 'registration']
+    df = df[columns]
     
     # 保存 CSV
     csv_path = output_path / 'aircraft_labels.csv'
@@ -432,19 +585,23 @@ def convert_export(export_json: str, output_dir: str):
     
     # 保存类别映射
     type_classes = {'classes': types, 'num_classes': len(types)}
-    with open(output_path / 'type_classes.json', 'w') as f:
-        json.dump(type_classes, f, indent=2)
+    with open(output_path / 'type_classes.json', 'w', encoding='utf-8') as f:
+        json.dump(type_classes, f, indent=2, ensure_ascii=False)
     print(f"✅ 机型类别: {len(types)} 个")
     
     airline_classes = {'classes': airlines, 'num_classes': len(airlines)}
-    with open(output_path / 'airline_classes.json', 'w') as f:
-        json.dump(airline_classes, f, indent=2)
+    with open(output_path / 'airline_classes.json', 'w', encoding='utf-8') as f:
+        json.dump(airline_classes, f, indent=2, ensure_ascii=False)
     print(f"✅ 航司类别: {len(airlines)} 个")
+    
+    # 统计注册号区域标注
+    reg_files = list(reg_dir.glob('*.txt'))
+    print(f"✅ 注册号区域标注: {len(reg_files)} 个文件")
 
 
 if __name__ == "__main__":
     convert_export(
-        export_json="export.json",  # Label Studio 导出的文件
+        export_json="export.json",  # Label Studio 导出的 JSON 文件
         output_dir="training/data/labels"
     )
 ```
@@ -584,10 +741,18 @@ from pathlib import Path
 from PIL import Image
 from collections import Counter
 
-def verify_dataset(data_dir: str, csv_path: str):
+def verify_dataset(data_dir: str, labels_dir: str):
     """验证数据集质量"""
     
     data_path = Path(data_dir)
+    labels_path = Path(labels_dir)
+    
+    # 读取主标注文件
+    csv_path = labels_path / 'aircraft_labels.csv'
+    if not csv_path.exists():
+        print(f"❌ 找不到标注文件: {csv_path}")
+        return False
+    
     df = pd.read_csv(csv_path)
     
     issues = []
@@ -600,13 +765,29 @@ def verify_dataset(data_dir: str, csv_path: str):
     # 1. 检查图片是否存在
     print("\n📁 检查图片文件...")
     missing_images = []
-    for split in ['train', 'val', 'test']:
+    for split in ['train', 'val', 'test', 'unsorted']:
+        split_dir = data_path / split
+        if not split_dir.exists():
+            continue
+        
         split_csv = data_path / f'{split}.csv'
         if split_csv.exists():
             split_df = pd.read_csv(split_csv)
-            for filename in split_df['filename']:
-                img_path = data_path / split / filename
-                if not img_path.exists():
+            check_df = split_df
+        else:
+            check_df = df
+        
+        for filename in check_df['filename']:
+            img_path = split_dir / filename
+            if not img_path.exists():
+                # 尝试其他扩展名
+                found = False
+                for ext in ['.jpg', '.jpeg', '.png', '.JPG', '.PNG']:
+                    alt_path = split_dir / (Path(filename).stem + ext)
+                    if alt_path.exists():
+                        found = True
+                        break
+                if not found:
                     missing_images.append(str(img_path))
     
     if missing_images:
@@ -633,20 +814,20 @@ def verify_dataset(data_dir: str, csv_path: str):
         if len(invalid_clarity) > 0:
             issues.append(f"❌ {len(invalid_clarity)} 条 clarity 不在 0-1 范围")
         else:
-            print("✅ clarity 范围正确 [0, 1]")
+            print(f"✅ clarity 范围正确 [0, 1]，均值: {df['clarity'].mean():.2f}")
     
     if 'block' in df.columns:
         invalid_block = df[(df['block'] < 0) | (df['block'] > 1)]
         if len(invalid_block) > 0:
             issues.append(f"❌ {len(invalid_block)} 条 block 不在 0-1 范围")
         else:
-            print("✅ block 范围正确 [0, 1]")
+            print(f"✅ block 范围正确 [0, 1]，均值: {df['block'].mean():.2f}")
     
     # 4. 检查类别分布
-    print("\n📈 类别分布:")
+    print("\n📈 机型分布:")
     type_counts = Counter(df['typename'].dropna())
     
-    min_samples = 50  # 每类至少需要的样本数
+    min_samples = 50
     for typename, count in type_counts.most_common():
         bar = "█" * (count // 20)
         status = "⚠️" if count < min_samples else "  "
@@ -654,34 +835,51 @@ def verify_dataset(data_dir: str, csv_path: str):
         if count < min_samples:
             warnings.append(f"⚠️ {typename} 只有 {count} 个样本，建议增加到 {min_samples}+")
     
-    # 5. 检查重复
+    # 5. 检查注册号区域标注
+    print("\n📍 检查注册号区域标注...")
+    reg_dir = labels_path / 'registration'
+    if reg_dir.exists():
+        reg_files = list(reg_dir.glob('*.txt'))
+        print(f"  注册号区域标注文件: {len(reg_files)} 个")
+        
+        # 检查格式
+        format_errors = 0
+        for txt_file in reg_files[:100]:  # 抽样检查
+            try:
+                content = txt_file.read_text().strip()
+                if content:
+                    for line in content.split('\n'):
+                        parts = line.strip().split()
+                        if len(parts) != 5:
+                            format_errors += 1
+                            break
+                        # 检查数值范围
+                        class_id = int(parts[0])
+                        x, y, w, h = map(float, parts[1:])
+                        if not (0 <= x <= 1 and 0 <= y <= 1 and 0 <= w <= 1 and 0 <= h <= 1):
+                            format_errors += 1
+                            break
+            except Exception as e:
+                format_errors += 1
+        
+        if format_errors > 0:
+            issues.append(f"❌ {format_errors} 个注册号区域标注格式错误")
+        else:
+            print("✅ 注册号区域标注格式正确")
+        
+        # 检查与 CSV 的对应关系
+        reg_count_in_csv = df['registration'].notna().sum() - (df['registration'] == '').sum()
+        print(f"  CSV 中有注册号的记录: {reg_count_in_csv} 条")
+    else:
+        print("  ⚠️ 注册号区域目录不存在（如果不需要 OCR 可忽略）")
+    
+    # 6. 检查重复
     print("\n🔍 检查重复...")
     duplicates = df[df.duplicated(subset=['filename'], keep=False)]
     if len(duplicates) > 0:
         issues.append(f"❌ 发现 {len(duplicates)} 条重复记录")
     else:
         print("✅ 无重复记录")
-    
-    # 6. 抽样检查图片尺寸
-    print("\n📐 抽样检查图片尺寸...")
-    sample_images = list((data_path / 'train').glob('*.jpg'))[:100]
-    sizes = []
-    for img_path in sample_images:
-        try:
-            with Image.open(img_path) as img:
-                sizes.append(img.size)
-        except:
-            pass
-    
-    if sizes:
-        widths = [s[0] for s in sizes]
-        heights = [s[1] for s in sizes]
-        print(f"  宽度范围: {min(widths)} - {max(widths)}")
-        print(f"  高度范围: {min(heights)} - {max(heights)}")
-        
-        small_images = [s for s in sizes if s[0] < 224 or s[1] < 224]
-        if small_images:
-            warnings.append(f"⚠️ {len(small_images)} 张图片小于 224x224")
     
     # 汇总
     print("\n" + "=" * 60)
@@ -711,7 +909,7 @@ def verify_dataset(data_dir: str, csv_path: str):
 if __name__ == "__main__":
     verify_dataset(
         data_dir="training/data/processed/aircraft_crop",
-        csv_path="training/data/labels/aircraft_labels.csv"
+        labels_dir="training/data/labels"
     )
 ```
 
@@ -723,10 +921,39 @@ if __name__ == "__main__":
 
 - [ ] 有至少 1000+ 张裁剪好的飞机图片
 - [ ] 每个机型至少 50+ 张图片
-- [ ] `aircraft_labels.csv` 包含所有必要字段
+- [ ] `aircraft_labels.csv` 包含所有必要字段（filename, typename, clarity, block）
 - [ ] `type_classes.json` 和 `airline_classes.json` 已生成
+- [ ] 注册号区域标注文件格式正确（`registration/*.txt`，YOLO 格式）
 - [ ] 数据已划分为 train/val/test
 - [ ] `verify_data.py` 无严重错误
+
+---
+
+## 📦 最终文件结构
+
+```
+training/data/
+├── processed/
+│   └── aircraft_crop/
+│       ├── unsorted/          # 裁剪后待标注（标注时使用）
+│       │   ├── IMG_0001.jpg
+│       │   └── ...
+│       ├── train/             # 训练集（划分后）
+│       ├── val/               # 验证集
+│       └── test/              # 测试集
+│
+└── labels/
+    ├── aircraft_labels.csv    # 主标注文件
+    ├── type_classes.json      # 机型类别映射
+    ├── airline_classes.json   # 航司类别映射
+    ├── train.csv              # 训练集标注
+    ├── val.csv                # 验证集标注
+    ├── test.csv               # 测试集标注
+    └── registration/          # 注册号区域标注 (YOLO 格式)
+        ├── IMG_0001.txt       # 0 x_center y_center width height
+        ├── IMG_0002.txt
+        └── ...
+```
 
 ---
 
@@ -746,6 +973,7 @@ if __name__ == "__main__":
 2. **不确定就标 Unknown**：宁缺毋滥，错误标注比没有标注更糟糕
 3. **定期备份**：每标注 100 张就导出一次
 4. **记录问题图片**：遇到不确定的图片，记下来稍后处理
+5. **注册号区域**：如果看不清注册号，**不要画框也不要填文字**
 
 ---
 
