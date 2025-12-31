@@ -1,0 +1,757 @@
+# 阶段 1：数据准备与标注
+
+> ⏱️ 预计时间：3-5 天
+> 🎯 目标：获得干净的飞机裁剪图 + 完成标注
+> ⚠️ 这是最重要的阶段，80% 的模型失败都死在数据上！
+
+---
+
+## 📋 本阶段检查清单
+
+完成本阶段后，你需要有：
+- [ ] 裁剪好的飞机图片（每张图只有飞机主体）
+- [ ] 完整的标注 CSV 文件
+- [ ] 类别映射 JSON 文件
+- [ ] 数据质量验证通过
+
+---
+
+## 第一步：理解你的数据
+
+### 1.1 你的标注字段
+
+根据你的数据格式，标注文件包含以下字段：
+
+```csv
+filename,typeid,typename,airlineid,airlinename,clarity,block,registration,airplanearea,registrationarea
+```
+
+| 字段 | 含义 | 用途 |
+|------|------|------|
+| `filename` | 图片文件名 | 找到图片 |
+| `typeid` | 机型编号 | 分类标签（自动生成） |
+| `typename` | 机型名称 | 如 A320、B737-800 |
+| `airlineid` | 航司编号 | 分类标签（自动生成） |
+| `airlinename` | 航司名称 | 如 China Eastern |
+| `clarity` | 清晰度 0-1 | 回归任务（1=最清晰） |
+| `block` | 遮挡程度 0-1 | 回归任务（0=无遮挡，1=完全遮挡） |
+| `registration` | 注册号 | OCR 任务 |
+| `airplanearea` | 飞机占比 | 辅助信息 |
+| `registrationarea` | 注册号位置 | OCR 检测任务 |
+
+### 1.2 数据来源建议
+
+| 来源 | 网址 | 优点 | 注意事项 |
+|------|------|------|----------|
+| JetPhotos | jetphotos.com | 高质量、有机型标注 | 需遵守版权 |
+| Planespotters | planespotters.net | 注册号数据丰富 | 需遵守版权 |
+| Flickr | flickr.com | 量大 | 需筛选质量 |
+| 自己拍摄 | - | 无版权问题 | 数量有限 |
+
+---
+
+## 第二步：飞机裁剪
+
+### 2.1 为什么要裁剪？
+
+原始图片通常包含大量背景（天空、机场、地面），直接用于训练会让模型学到很多无用信息。
+
+```
+原始图片                    裁剪后
+┌─────────────────────┐    ┌─────────────────┐
+│     天空 天空 天空    │    │                 │
+│  ═══╦═══════════╦═══│ →  │  ═══════════════│
+│     ║   飞机    ║   │    │     飞机         │
+│  ═══╩═══════════╩═══│    │  ═══════════════│
+│     跑道 跑道 跑道    │    │                 │
+└─────────────────────┘    └─────────────────┘
+```
+
+### 2.2 使用 YOLOv8 自动裁剪
+
+创建裁剪脚本：
+
+```python
+# training/scripts/crop_aircraft.py
+"""使用 YOLOv8 检测并裁剪飞机"""
+
+from ultralytics import YOLO
+from pathlib import Path
+from PIL import Image
+import shutil
+from tqdm import tqdm
+
+def crop_aircraft(
+    input_dir: str,
+    output_dir: str,
+    conf_threshold: float = 0.5,
+    padding: float = 0.1,
+    min_size: int = 224
+):
+    """
+    检测并裁剪飞机
+    
+    Args:
+        input_dir: 原始图片目录
+        output_dir: 输出目录
+        conf_threshold: 检测置信度阈值
+        padding: 边界框扩展比例（避免裁太紧）
+        min_size: 最小输出尺寸
+    """
+    input_path = Path(input_dir)
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    # 加载 YOLOv8（COCO 预训练，包含 airplane 类别）
+    model = YOLO("yolov8m.pt")  # 中等大小，平衡速度和精度
+    
+    # COCO 数据集中 airplane 的类别 ID 是 4
+    AIRPLANE_CLASS = 4
+    
+    # 统计
+    total = 0
+    success = 0
+    no_detection = 0
+    too_small = 0
+    
+    # 获取所有图片
+    image_files = list(input_path.glob("*.jpg")) + list(input_path.glob("*.jpeg")) + list(input_path.glob("*.png"))
+    
+    print(f"找到 {len(image_files)} 张图片")
+    
+    for img_file in tqdm(image_files, desc="裁剪飞机"):
+        total += 1
+        
+        try:
+            # 检测
+            results = model(str(img_file), verbose=False)[0]
+            
+            # 筛选飞机检测结果
+            boxes = results.boxes
+            airplane_boxes = []
+            
+            for i, cls in enumerate(boxes.cls):
+                if int(cls) == AIRPLANE_CLASS and boxes.conf[i] >= conf_threshold:
+                    airplane_boxes.append({
+                        'box': boxes.xyxy[i].cpu().numpy(),
+                        'conf': boxes.conf[i].cpu().item()
+                    })
+            
+            if not airplane_boxes:
+                no_detection += 1
+                continue
+            
+            # 选择置信度最高的（或最大的）
+            best_box = max(airplane_boxes, key=lambda x: x['conf'])
+            x1, y1, x2, y2 = best_box['box']
+            
+            # 打开原图
+            img = Image.open(img_file)
+            img_w, img_h = img.size
+            
+            # 添加 padding
+            box_w = x2 - x1
+            box_h = y2 - y1
+            pad_w = box_w * padding
+            pad_h = box_h * padding
+            
+            x1 = max(0, x1 - pad_w)
+            y1 = max(0, y1 - pad_h)
+            x2 = min(img_w, x2 + pad_w)
+            y2 = min(img_h, y2 + pad_h)
+            
+            # 检查尺寸
+            if (x2 - x1) < min_size or (y2 - y1) < min_size:
+                too_small += 1
+                continue
+            
+            # 裁剪并保存
+            cropped = img.crop((int(x1), int(y1), int(x2), int(y2)))
+            output_file = output_path / img_file.name
+            cropped.save(output_file, quality=95)
+            success += 1
+            
+        except Exception as e:
+            print(f"处理 {img_file.name} 时出错: {e}")
+            continue
+    
+    # 打印统计
+    print("\n" + "=" * 50)
+    print(f"处理完成！")
+    print(f"  总数: {total}")
+    print(f"  成功: {success}")
+    print(f"  未检测到飞机: {no_detection}")
+    print(f"  太小跳过: {too_small}")
+    print(f"  输出目录: {output_path}")
+    print("=" * 50)
+
+
+if __name__ == "__main__":
+    crop_aircraft(
+        input_dir="training/data/raw",
+        output_dir="training/data/processed/aircraft_crop/unsorted",
+        conf_threshold=0.5,
+        padding=0.1
+    )
+```
+
+运行：
+```bash
+python training/scripts/crop_aircraft.py
+```
+
+### 2.3 手动检查裁剪结果
+
+裁剪后，**必须**人工检查一遍：
+
+```python
+# training/scripts/review_crops.py
+"""简单的图片浏览脚本，用于检查裁剪结果"""
+
+import matplotlib.pyplot as plt
+from pathlib import Path
+from PIL import Image
+import random
+
+def review_random_samples(image_dir: str, n_samples: int = 20):
+    """随机查看一些裁剪结果"""
+    image_path = Path(image_dir)
+    images = list(image_path.glob("*.jpg"))
+    
+    if len(images) == 0:
+        print("未找到图片！")
+        return
+    
+    samples = random.sample(images, min(n_samples, len(images)))
+    
+    # 显示图片网格
+    cols = 5
+    rows = (len(samples) + cols - 1) // cols
+    
+    fig, axes = plt.subplots(rows, cols, figsize=(15, 3 * rows))
+    axes = axes.flatten() if rows > 1 else [axes] if cols == 1 else axes
+    
+    for ax, img_path in zip(axes, samples):
+        img = Image.open(img_path)
+        ax.imshow(img)
+        ax.set_title(img_path.name[:15] + "...", fontsize=8)
+        ax.axis('off')
+    
+    # 隐藏多余的子图
+    for ax in axes[len(samples):]:
+        ax.axis('off')
+    
+    plt.tight_layout()
+    plt.savefig("training/logs/crop_review.png", dpi=150)
+    plt.show()
+    print(f"已保存到 training/logs/crop_review.png")
+
+if __name__ == "__main__":
+    review_random_samples("training/data/processed/aircraft_crop/unsorted")
+```
+
+**检查要点：**
+- [ ] 飞机主体完整（没有被裁掉机翼、尾翼）
+- [ ] 没有裁到其他飞机
+- [ ] 边界适中（不要太紧也不要太松）
+
+---
+
+## 第三步：数据标注
+
+### 3.1 标注策略
+
+你需要标注的字段：
+
+| 字段 | 优先级 | 标注难度 | 说明 |
+|------|--------|----------|------|
+| `typename` | P0 | 中 | 需要航空知识 |
+| `clarity` | P0 | 低 | 主观判断 0-1 |
+| `block` | P0 | 低 | 遮挡程度 0-1 |
+| `airlinename` | P1 | 低 | 看涂装 |
+| `registration` | P2 | 中 | 需要看清字符 |
+| `registrationarea` | P2 | 中 | 画框 |
+
+### 3.2 标注规范
+
+#### clarity（清晰度）评分标准
+
+| 分数 | 描述 | 示例情况 |
+|------|------|----------|
+| 0.9-1.0 | 非常清晰 | 细节锐利，可以看清小字 |
+| 0.7-0.9 | 清晰 | 整体清晰，细节略有模糊 |
+| 0.5-0.7 | 一般 | 能辨认机型，但不够锐利 |
+| 0.3-0.5 | 模糊 | 勉强能辨认 |
+| 0.0-0.3 | 非常模糊 | 几乎无法辨认 |
+
+#### block（遮挡程度）评分标准
+
+| 分数 | 描述 | 示例情况 |
+|------|------|----------|
+| 0.0 | 无遮挡 | 飞机完全可见 |
+| 0.1-0.3 | 轻微遮挡 | 一小部分被遮挡（如起落架被地面挡住） |
+| 0.3-0.5 | 部分遮挡 | 约 1/3 被遮挡（如被其他飞机部分挡住） |
+| 0.5-0.7 | 明显遮挡 | 约一半被遮挡 |
+| 0.7-1.0 | 严重遮挡 | 大部分被遮挡，难以辨认 |
+
+### 3.3 使用 Label Studio 标注（推荐）
+
+**安装：**
+```bash
+pip install label-studio
+label-studio start --port 8080
+```
+
+**创建项目配置 XML：**
+```xml
+<View>
+  <Image name="image" value="$image" zoom="true"/>
+  
+  <!-- 机型分类 -->
+  <Header value="机型 Aircraft Type"/>
+  <Choices name="typename" toName="image" choice="single" required="true">
+    <Choice value="A320"/><Choice value="A321"/>
+    <Choice value="A330-300"/><Choice value="A350-900"/><Choice value="A380"/>
+    <Choice value="B737-800"/><Choice value="B737-MAX8"/>
+    <Choice value="B747-400"/><Choice value="B777-300ER"/><Choice value="B787-9"/>
+    <Choice value="ARJ21"/><Choice value="C919"/>
+    <Choice value="Unknown"/>
+  </Choices>
+  
+  <!-- 航司分类 -->
+  <Header value="航空公司 Airline"/>
+  <Choices name="airlinename" toName="image" choice="single">
+    <Choice value="Air China"/><Choice value="China Eastern"/>
+    <Choice value="China Southern"/><Choice value="Hainan Airlines"/>
+    <Choice value="Xiamen Airlines"/><Choice value="Spring Airlines"/>
+    <Choice value="Cathay Pacific"/><Choice value="Other"/><Choice value="Unknown"/>
+  </Choices>
+  
+  <!-- 清晰度 -->
+  <Header value="清晰度 Clarity (1=清晰, 10=模糊)"/>
+  <Rating name="clarity" toName="image" maxRating="10"/>
+  
+  <!-- 遮挡程度 -->
+  <Header value="遮挡程度 Block (1=无遮挡, 10=完全遮挡)"/>
+  <Rating name="block" toName="image" maxRating="10"/>
+  
+  <!-- 注册号 -->
+  <Header value="注册号 Registration"/>
+  <TextArea name="registration" toName="image" placeholder="B-1234"/>
+  
+  <!-- 注册号区域 -->
+  <Header value="注册号区域"/>
+  <RectangleLabels name="registrationarea" toName="image">
+    <Label value="reg" background="#FF0000"/>
+  </RectangleLabels>
+</View>
+```
+
+### 3.4 导出并转换格式
+
+```python
+# training/scripts/convert_labelstudio.py
+"""将 Label Studio 导出转换为训练格式"""
+
+import json
+import pandas as pd
+from pathlib import Path
+
+def convert_export(export_json: str, output_dir: str):
+    """转换 Label Studio JSON 导出"""
+    
+    with open(export_json, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    records = []
+    
+    for item in data:
+        filename = Path(item['data']['image']).name
+        results = item.get('annotations', [{}])[0].get('result', [])
+        
+        record = {
+            'filename': filename,
+            'typename': '',
+            'airlinename': '',
+            'clarity': 1.0,
+            'block': 0.0,
+            'registration': '',
+            'registrationarea': ''
+        }
+        
+        for r in results:
+            if r['type'] == 'choices':
+                if r['from_name'] == 'typename':
+                    record['typename'] = r['value']['choices'][0]
+                elif r['from_name'] == 'airlinename':
+                    record['airlinename'] = r['value']['choices'][0] if r['value']['choices'] else ''
+            elif r['type'] == 'rating':
+                if r['from_name'] == 'clarity':
+                    # Label Studio 评分是 1-10，转换为 0-1（反转，因为 1=清晰）
+                    record['clarity'] = 1.0 - (r['value']['rating'] - 1) / 9.0
+                elif r['from_name'] == 'block':
+                    # 1=无遮挡 → 0.0, 10=完全遮挡 → 1.0
+                    record['block'] = (r['value']['rating'] - 1) / 9.0
+            elif r['type'] == 'textarea' and r['from_name'] == 'registration':
+                text = r['value']['text'][0] if r['value']['text'] else ''
+                record['registration'] = text.upper().replace(' ', '')
+            elif r['type'] == 'rectanglelabels':
+                # 转换为 YOLO 格式: x_center y_center width height (归一化)
+                x = r['value']['x'] / 100
+                y = r['value']['y'] / 100
+                w = r['value']['width'] / 100
+                h = r['value']['height'] / 100
+                record['registrationarea'] = f"{x + w/2:.4f} {y + h/2:.4f} {w:.4f} {h:.4f}"
+        
+        records.append(record)
+    
+    # 创建 DataFrame
+    df = pd.DataFrame(records)
+    
+    # 生成 ID
+    types = sorted(df['typename'].dropna().unique().tolist())
+    airlines = sorted(df['airlinename'].dropna().unique().tolist())
+    
+    type_to_id = {t: i for i, t in enumerate(types)}
+    airline_to_id = {a: i for i, a in enumerate(airlines)}
+    
+    df['typeid'] = df['typename'].map(type_to_id)
+    df['airlineid'] = df['airlinename'].map(airline_to_id)
+    
+    # 重新排列列
+    columns = ['filename', 'typeid', 'typename', 'airlineid', 'airlinename', 
+               'clarity', 'block', 'registration', 'airplanearea', 'registrationarea']
+    df['airplanearea'] = ''  # 如果没有这个字段
+    df = df[[c for c in columns if c in df.columns]]
+    
+    # 保存 CSV
+    csv_path = output_path / 'aircraft_labels.csv'
+    df.to_csv(csv_path, index=False)
+    print(f"✅ 保存标注: {csv_path} ({len(df)} 条)")
+    
+    # 保存类别映射
+    type_classes = {'classes': types, 'num_classes': len(types)}
+    with open(output_path / 'type_classes.json', 'w') as f:
+        json.dump(type_classes, f, indent=2)
+    print(f"✅ 机型类别: {len(types)} 个")
+    
+    airline_classes = {'classes': airlines, 'num_classes': len(airlines)}
+    with open(output_path / 'airline_classes.json', 'w') as f:
+        json.dump(airline_classes, f, indent=2)
+    print(f"✅ 航司类别: {len(airlines)} 个")
+
+
+if __name__ == "__main__":
+    convert_export(
+        export_json="export.json",  # Label Studio 导出的文件
+        output_dir="training/data/labels"
+    )
+```
+
+---
+
+## 第四步：数据集划分
+
+### 4.1 划分原则
+
+| 集合 | 比例 | 用途 |
+|------|------|------|
+| 训练集 (train) | 70% | 模型学习 |
+| 验证集 (val) | 15% | 调参、Early Stopping |
+| 测试集 (test) | 15% | 最终评估（只用一次） |
+
+**重要原则：**
+- 同一架飞机的照片应该在同一个集合（避免数据泄露）
+- 各类别在各集合中比例应该接近（分层抽样）
+
+### 4.2 划分脚本
+
+```python
+# training/scripts/split_dataset.py
+"""数据集划分"""
+
+import pandas as pd
+from pathlib import Path
+from sklearn.model_selection import train_test_split
+import shutil
+from tqdm import tqdm
+
+def split_dataset(
+    csv_path: str,
+    image_dir: str,
+    output_base: str,
+    train_ratio: float = 0.7,
+    val_ratio: float = 0.15,
+    random_seed: int = 42
+):
+    """
+    划分数据集
+    
+    Args:
+        csv_path: 标注 CSV 文件
+        image_dir: 原始图片目录
+        output_base: 输出基础目录
+        train_ratio: 训练集比例
+        val_ratio: 验证集比例（剩余为测试集）
+        random_seed: 随机种子（保证可复现）
+    """
+    # 读取标注
+    df = pd.read_csv(csv_path)
+    print(f"总样本数: {len(df)}")
+    
+    # 过滤掉没有机型标注的
+    df = df[df['typename'].notna() & (df['typename'] != '')]
+    print(f"有效样本数: {len(df)}")
+    
+    # 分层划分（按机型）
+    # 先分出测试集
+    test_ratio = 1 - train_ratio - val_ratio
+    train_val_df, test_df = train_test_split(
+        df, 
+        test_size=test_ratio,
+        stratify=df['typename'],
+        random_state=random_seed
+    )
+    
+    # 再从训练+验证中分出验证集
+    val_ratio_adjusted = val_ratio / (train_ratio + val_ratio)
+    train_df, val_df = train_test_split(
+        train_val_df,
+        test_size=val_ratio_adjusted,
+        stratify=train_val_df['typename'],
+        random_state=random_seed
+    )
+    
+    print(f"训练集: {len(train_df)}")
+    print(f"验证集: {len(val_df)}")
+    print(f"测试集: {len(test_df)}")
+    
+    # 复制图片到对应目录
+    image_path = Path(image_dir)
+    output_path = Path(output_base)
+    
+    def copy_images(subset_df, split_name):
+        split_dir = output_path / split_name
+        split_dir.mkdir(parents=True, exist_ok=True)
+        
+        for _, row in tqdm(subset_df.iterrows(), total=len(subset_df), desc=f"复制 {split_name}"):
+            src = image_path / row['filename']
+            if src.exists():
+                dst = split_dir / row['filename']
+                shutil.copy2(src, dst)
+    
+    copy_images(train_df, 'train')
+    copy_images(val_df, 'val')
+    copy_images(test_df, 'test')
+    
+    # 保存划分后的 CSV
+    train_df.to_csv(output_path / 'train.csv', index=False)
+    val_df.to_csv(output_path / 'val.csv', index=False)
+    test_df.to_csv(output_path / 'test.csv', index=False)
+    
+    print("\n✅ 数据集划分完成！")
+    
+    # 打印各类别分布
+    print("\n各机型分布:")
+    for typename in sorted(df['typename'].unique()):
+        train_count = len(train_df[train_df['typename'] == typename])
+        val_count = len(val_df[val_df['typename'] == typename])
+        test_count = len(test_df[test_df['typename'] == typename])
+        print(f"  {typename:15} Train:{train_count:4} Val:{val_count:3} Test:{test_count:3}")
+
+
+if __name__ == "__main__":
+    split_dataset(
+        csv_path="training/data/labels/aircraft_labels.csv",
+        image_dir="training/data/processed/aircraft_crop/unsorted",
+        output_base="training/data/processed/aircraft_crop"
+    )
+```
+
+---
+
+## 第五步：数据质量验证
+
+### 5.1 验证脚本
+
+```python
+# training/scripts/verify_data.py
+"""数据质量验证"""
+
+import pandas as pd
+from pathlib import Path
+from PIL import Image
+from collections import Counter
+
+def verify_dataset(data_dir: str, csv_path: str):
+    """验证数据集质量"""
+    
+    data_path = Path(data_dir)
+    df = pd.read_csv(csv_path)
+    
+    issues = []
+    warnings = []
+    
+    print("=" * 60)
+    print("数据质量检查")
+    print("=" * 60)
+    
+    # 1. 检查图片是否存在
+    print("\n📁 检查图片文件...")
+    missing_images = []
+    for split in ['train', 'val', 'test']:
+        split_csv = data_path / f'{split}.csv'
+        if split_csv.exists():
+            split_df = pd.read_csv(split_csv)
+            for filename in split_df['filename']:
+                img_path = data_path / split / filename
+                if not img_path.exists():
+                    missing_images.append(str(img_path))
+    
+    if missing_images:
+        issues.append(f"❌ {len(missing_images)} 个图片文件缺失")
+        for p in missing_images[:5]:
+            print(f"   缺失: {p}")
+        if len(missing_images) > 5:
+            print(f"   ... 还有 {len(missing_images) - 5} 个")
+    else:
+        print("✅ 所有图片文件存在")
+    
+    # 2. 检查标注完整性
+    print("\n📋 检查标注完整性...")
+    empty_typename = df[df['typename'].isna() | (df['typename'] == '')]
+    if len(empty_typename) > 0:
+        issues.append(f"❌ {len(empty_typename)} 条记录缺少 typename")
+    else:
+        print("✅ 所有记录都有 typename")
+    
+    # 3. 检查 clarity 和 block 范围
+    print("\n📊 检查数值范围...")
+    if 'clarity' in df.columns:
+        invalid_clarity = df[(df['clarity'] < 0) | (df['clarity'] > 1)]
+        if len(invalid_clarity) > 0:
+            issues.append(f"❌ {len(invalid_clarity)} 条 clarity 不在 0-1 范围")
+        else:
+            print("✅ clarity 范围正确 [0, 1]")
+    
+    if 'block' in df.columns:
+        invalid_block = df[(df['block'] < 0) | (df['block'] > 1)]
+        if len(invalid_block) > 0:
+            issues.append(f"❌ {len(invalid_block)} 条 block 不在 0-1 范围")
+        else:
+            print("✅ block 范围正确 [0, 1]")
+    
+    # 4. 检查类别分布
+    print("\n📈 类别分布:")
+    type_counts = Counter(df['typename'].dropna())
+    
+    min_samples = 50  # 每类至少需要的样本数
+    for typename, count in type_counts.most_common():
+        bar = "█" * (count // 20)
+        status = "⚠️" if count < min_samples else "  "
+        print(f"  {status} {typename:15} {count:4} {bar}")
+        if count < min_samples:
+            warnings.append(f"⚠️ {typename} 只有 {count} 个样本，建议增加到 {min_samples}+")
+    
+    # 5. 检查重复
+    print("\n🔍 检查重复...")
+    duplicates = df[df.duplicated(subset=['filename'], keep=False)]
+    if len(duplicates) > 0:
+        issues.append(f"❌ 发现 {len(duplicates)} 条重复记录")
+    else:
+        print("✅ 无重复记录")
+    
+    # 6. 抽样检查图片尺寸
+    print("\n📐 抽样检查图片尺寸...")
+    sample_images = list((data_path / 'train').glob('*.jpg'))[:100]
+    sizes = []
+    for img_path in sample_images:
+        try:
+            with Image.open(img_path) as img:
+                sizes.append(img.size)
+        except:
+            pass
+    
+    if sizes:
+        widths = [s[0] for s in sizes]
+        heights = [s[1] for s in sizes]
+        print(f"  宽度范围: {min(widths)} - {max(widths)}")
+        print(f"  高度范围: {min(heights)} - {max(heights)}")
+        
+        small_images = [s for s in sizes if s[0] < 224 or s[1] < 224]
+        if small_images:
+            warnings.append(f"⚠️ {len(small_images)} 张图片小于 224x224")
+    
+    # 汇总
+    print("\n" + "=" * 60)
+    print("检查结果汇总")
+    print("=" * 60)
+    
+    if issues:
+        print("\n❌ 严重问题（必须修复）:")
+        for issue in issues:
+            print(f"  {issue}")
+    
+    if warnings:
+        print("\n⚠️ 警告（建议处理）:")
+        for warning in warnings:
+            print(f"  {warning}")
+    
+    if not issues and not warnings:
+        print("\n🎉 所有检查通过！数据质量良好")
+    elif not issues:
+        print("\n✅ 无严重问题，可以继续（建议处理警告）")
+    else:
+        print("\n❌ 请修复严重问题后再继续")
+    
+    return len(issues) == 0
+
+
+if __name__ == "__main__":
+    verify_dataset(
+        data_dir="training/data/processed/aircraft_crop",
+        csv_path="training/data/labels/aircraft_labels.csv"
+    )
+```
+
+---
+
+## ✅ 过关标准
+
+在进入阶段 2 之前，确保：
+
+- [ ] 有至少 1000+ 张裁剪好的飞机图片
+- [ ] 每个机型至少 50+ 张图片
+- [ ] `aircraft_labels.csv` 包含所有必要字段
+- [ ] `type_classes.json` 和 `airline_classes.json` 已生成
+- [ ] 数据已划分为 train/val/test
+- [ ] `verify_data.py` 无严重错误
+
+---
+
+## ❌ 禁止事项
+
+在本阶段，**不要**：
+
+- ❌ 开始写训练代码
+- ❌ 纠结于完美标注（先完成，再完美）
+- ❌ 同时标注所有字段（先标 typename 和 clarity/block）
+
+---
+
+## 💡 小技巧
+
+1. **批量标注**：先按机型分组，一次性标注同一机型的所有图片
+2. **不确定就标 Unknown**：宁缺毋滥，错误标注比没有标注更糟糕
+3. **定期备份**：每标注 100 张就导出一次
+4. **记录问题图片**：遇到不确定的图片，记下来稍后处理
+
+---
+
+## 🔜 下一步
+
+完成所有检查项后，进入 [阶段 2：单任务训练](stage2_single_task.md)
+
