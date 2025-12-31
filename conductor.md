@@ -1,4 +1,4 @@
-# QuanPhotos AI 模型训练路线图
+# AeroVision-V1 AI 模型训练路线图
 
 > 本文档是自训练航空照片识别系统的完整实施指南
 
@@ -1390,3 +1390,4 @@ class AircraftAnalyzer:
 ---
 
 *最后更新：2024-12*
+
