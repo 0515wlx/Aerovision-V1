@@ -23,7 +23,7 @@
 根据你的数据格式，标注文件包含以下字段：
 
 ```csv
-filename,typeid,typename,airlineid,airlinename,clarity,block,registration,airplanearea,registrationarea
+filename,typeid,typename,airlineid,airlinename,clarity,block,registration
 ```
 
 | 字段 | 含义 | 用途 |
@@ -36,8 +36,6 @@ filename,typeid,typename,airlineid,airlinename,clarity,block,registration,airpla
 | `clarity` | 清晰度 0-1 | 回归任务（1=最清晰） |
 | `block` | 遮挡程度 0-1 | 回归任务（0=无遮挡，1=完全遮挡） |
 | `registration` | 注册号 | OCR 任务 |
-| `airplanearea` | 飞机占比 | 辅助信息 |
-| `registrationarea` | 注册号位置 | OCR 检测任务 |
 
 ### 1.2 数据来源建议
 
@@ -188,9 +186,9 @@ def crop_aircraft(
 
 if __name__ == "__main__":
     crop_aircraft(
-        input_dir="training/data/raw",
-        output_dir="training/data/processed/aircraft_crop/unsorted",
-        conf_threshold=0.5,
+        input_dir="../data/raw",
+        output_dir="../data/processed/aircraft_crop/unsorted",
+        conf_threshold=0.7,
         padding=0.1
     )
 ```
