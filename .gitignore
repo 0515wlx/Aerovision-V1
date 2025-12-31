@@ -211,3 +211,8 @@ training/data/
 
 # models
 training/model/
+
+# Datasets
+/FGVC_Aircraft_dataset/
+training/data/
+training/checkpoints/
