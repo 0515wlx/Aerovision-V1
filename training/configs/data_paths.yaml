@@ -1,0 +1,39 @@
+# 数据路径配置
+# 实际数据存储在服务器上: mnt/disk/Aerovision-V1-data
+
+# 原始数据路径（服务器）
+server_data_root: "mnt/disk/Aerovision-V1-data"
+
+# 本地数据路径（用于训练）
+local_data_root: "training/data"
+
+# 原始图片路径
+raw_images: "training/data/raw"
+
+# 裁剪后的飞机图片
+aircraft_crop:
+  unsorted: "training/data/processed/aircraft_crop/unsorted"
+  train: "training/data/processed/aircraft_crop/train"
+  val: "training/data/processed/aircraft_crop/val"
+  test: "training/data/processed/aircraft_crop/test"
+
+# 标注文件路径
+labels:
+  main: "training/data/labels/aircraft_labels.csv"
+  type_classes: "training/data/labels/type_classes.json"
+  airline_classes: "training/data/labels/airline_classes.json"
+  train: "training/data/labels/train.csv"
+  val: "training/data/labels/val.csv"
+  test: "training/data/labels/test.csv"
+  registration: "training/data/labels/registration"
+
+# 模型检查点路径
+checkpoints:
+  stage2: "training/checkpoints/stage2"
+  stage3: "training/checkpoints/stage3"
+  stage4: "training/checkpoints/stage4"
+  stage5: "training/checkpoints/stage5"
+  stage6: "training/checkpoints/stage6/registration_detector/weights"
+
+# 日志路径
+logs: "training/logs"
