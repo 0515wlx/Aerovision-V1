@@ -211,3 +211,6 @@ training/data/
 
 # models
 training/model/
+
+# logs
+training/logs/

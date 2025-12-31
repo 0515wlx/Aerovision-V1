@@ -1,0 +1,83 @@
+# training/config/default.yaml
+# Aerovision-V1 默认配置文件
+
+# 路径配置
+paths:
+  # 数据路径
+  data_root: "../data"
+  raw_images: "../data/raw"
+  processed_root: "../data/processed"
+  aircraft_crop: "../data/processed/aircraft_crop/unsorted"
+  registration_area: "../data/registration/registration_area"
+
+  # 模型路径
+  model_root: "../model"
+  yolo_model: "../model/yolov8m.pt"
+
+  # 日志路径
+  logs_root: "../logs"
+  crop_review: "../logs/crop_review_{timestamp}.png"  # {timestamp} -- UTC time
+
+  # 标签文件
+  labels_file: "../data/labels.csv"
+
+# YOLO检测配置
+yolo:
+  model_size: "yolov8m.pt"  # 可选: yolov8n, yolov8s, yolov8m, yolov8l, yolov8x
+  conf_threshold: 0.5  # 检测置信度阈值
+  airplane_class_id: 4  # COCO数据集中飞机的类别ID
+  device: "cuda"  # cuda 或 cpu
+  verbose: false
+
+# 裁剪配置
+crop:
+  padding: 0.1  # 边界框扩展比例（避免裁太紧）
+  min_size: 224  # 最小输出尺寸（像素）
+  output_quality: 100  # JPEG输出质量
+  image_extensions:
+    - "*.jpg"
+    - "*.jpeg"
+    - "*.png"
+    - "*.JPG"
+    - "*.JPEG"
+    - "*.PNG"
+    - "*.bmp"
+    - "*.BMP"
+
+# 图片审查配置
+review:
+  n_samples: 20  # 随机查看的样本数量
+  grid_cols: 5  # 网格列数
+  fig_width: 15  # 图形宽度
+  row_height: 3  # 每行高度
+  dpi: 150  # 输出分辨率
+  title_length: 15  # 标题显示长度
+
+# 训练配置（为未来的训练阶段准备）
+training:
+  batch_size: 32
+  learning_rate: 0.001
+  num_epochs: 100
+  image_size: 224
+  num_workers: 4
+
+# 数据增强配置
+augmentation:
+  enabled: true
+  horizontal_flip: true
+  vertical_flip: false
+  rotation_range: 15  # 度
+  brightness_range: 0.2
+  contrast_range: 0.2
+
+# OCR配置（Stage 6准备）
+ocr:
+  enabled: false
+  model: "paddleocr"
+  language: "en"
+
+# 日志配置
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  save_to_file: true
