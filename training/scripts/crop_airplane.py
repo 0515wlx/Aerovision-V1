@@ -213,3 +213,7 @@ def crop_aircraft(
                 print(f"  - {fname}")
             if len(failed_files['no_detection']) > 10:
                 print(f"  ... 还有 {len(failed_files['no_detection']) - 10} 个文件")
+
+if __name__ == '__main__':
+    # 运行脚本
+    crop_aircraft()
