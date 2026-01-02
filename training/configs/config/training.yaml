@@ -1,153 +1,87 @@
-# 模型训练配置
+# YOLOv8 训练配置
 # ⚠️ 重要：相对路径相对于 /training/configs 目录
+# 本配置适配 train_classify.py (YOLOv8 分类训练脚本)
 
-# 基础训练参数
-basic:
+training:
+  # 训练轮数
+  epochs: 100
+
   # 批次大小
   batch_size: 32
-
-  # 学习率
-  learning_rate: 0.001
-
-  # 训练轮数
-  num_epochs: 100
 
   # 图片尺寸
   image_size: 224
 
   # 数据加载线程数
-  num_workers: 4
+  workers: 8
 
-  # 是否使用混合精度训练
-  mixed_precision: true
+  # 混合精度训练
+  amp: true
 
-  # 梯度累积步数
-  gradient_accumulation_steps: 1
+  # 模型配置
+  model:
+    # YOLOv8 预训练模型名称或路径
+    name: "yolov8n-cls.pt"
 
-# 优化器配置
-optimizer:
-  # 优化器类型: adam, adamw, sgd
-  type: "adamw"
+  # 优化器配置
+  optimizer:
+    # 优化器类型: SGD, Adam, AdamW, NAdam, RAdam, RMSProp, auto
+    type: "AdamW"
 
-  # AdamW参数
-  adamw:
-    lr: 0.001
-    betas: [0.9, 0.999]
-    eps: 1.0e-8
-    weight_decay: 0.01
+    # 初始学习率
+    lr0: 0.001
 
-  # SGD参数
-  sgd:
-    lr: 0.01
-    momentum: 0.9
-    weight_decay: 0.0001
-    nesterov: true
+    # SGD动量 或 Adam beta1
+    momentum: 0.937
 
-# 学习率调度器
-scheduler:
-  # 调度器类型: cosine, step, plateau, onecycle
-  type: "cosine"
+    # 权重衰减 (L2正则化)
+    weight_decay: 0.0005
 
-  # Cosine Annealing
-  cosine:
-    T_max: 100
-    eta_min: 1.0e-6
-    warmup_epochs: 5
+  # 学习率调度器
+  scheduler:
+    # 是否使用余弦学习率调度
+    cosine: true
 
-  # Step LR
-  step:
-    step_size: 30
-    gamma: 0.1
+    # 最终学习率衰减比例 (final_lr = lr0 * lrf)
+    lrf: 0.01
 
-  # Reduce on Plateau
-  plateau:
-    mode: "min"
-    factor: 0.1
-    patience: 10
-    min_lr: 1.0e-6
+  # 正则化
+  regularization:
+    # 分类头的Dropout
+    dropout: 0.0
 
-  # OneCycle
-  onecycle:
-    max_lr: 0.01
-    pct_start: 0.3
-    anneal_strategy: "cos"
+  # 早停
+  early_stopping:
+    # 耐心值（多少个epoch没有改善就停止）
+    patience: 50
 
-# 正则化
-regularization:
-  # Dropout
-  dropout: 0.1
+  # Warmup配置
+  warmup:
+    # Warmup轮数
+    epochs: 3.0
 
-  # DropPath (Stochastic Depth)
-  drop_path: 0.1
+  # 输出配置
+  output:
+    # 项目名称（保存结果的根目录）
+    project: "runs/classify"
 
-  # Label Smoothing
-  label_smoothing: 0.1
+    # 实验名称
+    name: "aircraft_classifier"
 
-  # Mixup
-  mixup_alpha: 0.2
+  # 保存周期（每N个epoch保存一次检查点，-1禁用）
+  save_period: -1
 
-  # CutMix
-  cutmix_alpha: 1.0
+  # 验证配置
+  validation:
+    # 是否启用验证
+    enabled: true
 
-  # 随机擦除
-  random_erasing: 0.25
+  # 是否保存训练可视化图表
+  plots: true
 
-# 早停
-early_stopping:
-  # 是否启用
-  enabled: true
-
-  # 耐心值（多少个epoch没有改善就停止）
-  patience: 15
-
-  # 监控指标: loss, accuracy, f1
-  monitor: "val_loss"
-
-  # 模式: min, max
-  mode: "min"
-
-  # 最小改善量
-  min_delta: 0.0001
-
-# 检查点保存
-checkpoint:
-  # 保存目录
-  save_dir: "../checkpoints"
-
-  # 保存频率（每N个epoch保存一次）
-  save_frequency: 5
-
-  # 保存最佳模型
-  save_best: true
-
-  # 保存最后一个模型
-  save_last: true
-
-  # 最多保存N个检查点
-  max_keep: 5
-
-  # 监控指标
-  monitor: "val_accuracy"
-  mode: "max"
-
-# 验证配置
-validation:
-  # 验证频率（每N个epoch验证一次）
-  frequency: 1
-
-  # 验证批次大小
-  batch_size: 64
-
-# 日志配置
-logging:
-  # 日志频率（每N个step记录一次）
-  log_frequency: 10
-
-  # 是否记录学习率
-  log_lr: true
-
-  # 是否记录梯度范数
-  log_grad_norm: true
+# ========================================
+# 高级配置（用于自定义PyTorch训练）
+# ========================================
 
 # 多任务学习（Stage 3+）
 multitask:
@@ -163,8 +97,8 @@ multitask:
   # 损失函数权重策略: fixed, uncertainty, dwa
   loss_weight_strategy: "uncertainty"
 
-# 模型配置
-model:
+# 自定义模型配置（非YOLOv8）
+custom_model:
   # backbone类型: convnext, swin, resnet
   backbone: "convnext"
 
