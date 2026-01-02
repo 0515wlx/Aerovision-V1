@@ -44,6 +44,7 @@ class DatasetSplitter:
         self,
         labels_file: str,
         images_dir: str,
+        registration_dir: str = None,
         train_ratio: float = 0.7,
         val_ratio: float = 0.15,
         test_ratio: float = 0.15,
@@ -55,6 +56,7 @@ class DatasetSplitter:
         Args:
             labels_file: 标注文件路径
             images_dir: 图片目录路径
+            registration_dir: 注册号区域标注目录（YOLO格式txt文件）
             train_ratio: 训练集比例
             val_ratio: 验证集比例
             test_ratio: 测试集比例
@@ -62,6 +64,7 @@ class DatasetSplitter:
         """
         self.labels_file = Path(labels_file)
         self.images_dir = Path(images_dir)
+        self.registration_dir = Path(registration_dir) if registration_dir else None
         self.train_ratio = train_ratio
         self.val_ratio = val_ratio
         self.test_ratio = test_ratio
@@ -74,19 +77,29 @@ class DatasetSplitter:
                 f"当前为{train_ratio + val_ratio + test_ratio}"
             )
 
-        # 输出目录
-        self.output_dir = self.images_dir.parent
-        self.labels_output_dir = self.labels_file.parent
+        # 创建带时间戳的输出目录
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        splits_dir = self.labels_file.parent / 'splits'
+        splits_dir.mkdir(exist_ok=True)
 
-        # 输出 CSV 文件路径
-        self.train_csv = self.labels_output_dir / 'train.csv'
-        self.val_csv = self.labels_output_dir / 'val.csv'
-        self.test_csv = self.labels_output_dir / 'test.csv'
+        self.split_output_dir = splits_dir / f'split_{timestamp}'
+        self.split_output_dir.mkdir(parents=True, exist_ok=True)
 
-        # 输出图片目录
-        self.train_img_dir = self.output_dir / 'train'
-        self.val_img_dir = self.output_dir / 'val'
-        self.test_img_dir = self.output_dir / 'test'
+        # 输出 CSV 文件路径（放在 split 文件夹内）
+        self.train_csv = self.split_output_dir / 'train.csv'
+        self.val_csv = self.split_output_dir / 'val.csv'
+        self.test_csv = self.split_output_dir / 'test.csv'
+
+        # 输出图片目录（放在 split 文件夹内）
+        self.train_img_dir = self.split_output_dir / 'train'
+        self.val_img_dir = self.split_output_dir / 'val'
+        self.test_img_dir = self.split_output_dir / 'test'
+
+        # 输出标注目录（YOLO格式txt文件）
+        if self.registration_dir:
+            self.train_labels_dir = self.split_output_dir / 'labels' / 'train'
+            self.val_labels_dir = self.split_output_dir / 'labels' / 'val'
+            self.test_labels_dir = self.split_output_dir / 'labels' / 'test'
 
         # 数据集信息
         self.dataset_info = {
@@ -112,8 +125,11 @@ class DatasetSplitter:
         if not self.labels_file.exists():
             raise FileNotFoundError(f"标注文件不存在: {self.labels_file}")
 
-        # 读取 CSV 文件
-        df = pd.read_csv(self.labels_file)
+        # 读取 CSV 文件（使用 utf-8-sig 自动处理 BOM）
+        df = pd.read_csv(self.labels_file, encoding='utf-8-sig')
+
+        # 清理列名（去除可能的空格）
+        df.columns = df.columns.str.strip()
 
         # 检查必需的列
         required_columns = ['filename', 'typename', 'clarity', 'block']
@@ -243,32 +259,41 @@ class DatasetSplitter:
         for split_dir in [self.train_img_dir, self.val_img_dir, self.test_img_dir]:
             split_dir.mkdir(parents=True, exist_ok=True)
 
+        # 如果有注册号标注，创建 labels 目录
+        if self.registration_dir:
+            for labels_dir in [self.train_labels_dir, self.val_labels_dir, self.test_labels_dir]:
+                labels_dir.mkdir(parents=True, exist_ok=True)
+
         # 复制训练集图片
-        self._copy_split_images(train_df, self.train_img_dir, 'train')
+        self._copy_split_images(train_df, self.train_img_dir, self.train_labels_dir if self.registration_dir else None, 'train')
 
         # 复制验证集图片
-        self._copy_split_images(val_df, self.val_img_dir, 'val')
+        self._copy_split_images(val_df, self.val_img_dir, self.val_labels_dir if self.registration_dir else None, 'val')
 
         # 复制测试集图片
-        self._copy_split_images(test_df, self.test_img_dir, 'test')
+        self._copy_split_images(test_df, self.test_img_dir, self.test_labels_dir if self.registration_dir else None, 'test')
 
     def _copy_split_images(
         self,
         df: pd.DataFrame,
         output_dir: Path,
+        labels_dir: Path,
         split_name: str
     ) -> None:
         """
-        复制单个数据集的图片
+        复制单个数据集的图片和对应的标注文件
 
         Args:
             df: 数据集数据
-            output_dir: 输出目录
+            output_dir: 图片输出目录
+            labels_dir: 标注文件输出目录（可选）
             split_name: 数据集名称
         """
         copied_count = 0
         skipped_count = 0
         missing_count = 0
+        label_copied_count = 0
+        label_missing_count = 0
 
         for _, row in df.iterrows():
             filename = row['filename']
@@ -291,10 +316,32 @@ class DatasetSplitter:
             except Exception as e:
                 logger.error(f"复制图片失败 {filename}: {e}")
 
+            # 复制对应的注册号标注文件（如果存在）
+            if labels_dir and self.registration_dir:
+                # 将图片扩展名替换为 .txt
+                label_filename = Path(filename).stem + '.txt'
+                label_src_path = self.registration_dir / label_filename
+                label_dst_path = labels_dir / label_filename
+
+                if label_src_path.exists():
+                    try:
+                        shutil.copy2(label_src_path, label_dst_path)
+                        label_copied_count += 1
+                    except Exception as e:
+                        logger.error(f"复制标注文件失败 {label_filename}: {e}")
+                else:
+                    label_missing_count += 1
+
         logger.info(
             f"{split_name} 数据集图片复制完成: "
             f"成功{copied_count}, 跳过{skipped_count}, 缺失{missing_count}"
         )
+
+        if labels_dir and self.registration_dir:
+            logger.info(
+                f"{split_name} 数据集标注文件复制完成: "
+                f"成功{label_copied_count}, 缺失{label_missing_count}"
+            )
 
     def generate_class_mapping(
         self,
@@ -324,8 +371,8 @@ class DatasetSplitter:
             ]
         }
 
-        # 保存 JSON 文件
-        output_path = self.labels_output_dir / output_file
+        # 保存 JSON 文件（保存到 split 目录）
+        output_path = self.split_output_dir / output_file
         import json
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(class_mapping, f, ensure_ascii=False, indent=2)
@@ -407,6 +454,7 @@ class DatasetSplitter:
 
         logger.info("=" * 60)
         logger.info("数据集划分完成!")
+        logger.info(f"输出目录: {self.split_output_dir}")
         logger.info("=" * 60)
 
 
@@ -420,14 +468,20 @@ def main() -> None:
     parser.add_argument(
         '--labels',
         type=str,
-        default='training/data/labels/aircraft_labels.csv',
+        default='../data/labels.csv',
         help='标注文件路径'
     )
     parser.add_argument(
         '--images',
         type=str,
-        default='training/data/processed/aircraft_crop/unsorted',
+        default='../data/processed/labeled',
         help='图片目录路径'
+    )
+    parser.add_argument(
+        '--registration',
+        type=str,
+        default='../data/registration/registration_area',
+        help='注册号区域标注目录（YOLO格式txt文件）'
     )
     parser.add_argument(
         '--train-ratio',
@@ -460,6 +514,7 @@ def main() -> None:
     splitter = DatasetSplitter(
         labels_file=args.labels,
         images_dir=args.images,
+        registration_dir=args.registration,
         train_ratio=args.train_ratio,
         val_ratio=args.val_ratio,
         test_ratio=args.test_ratio,
