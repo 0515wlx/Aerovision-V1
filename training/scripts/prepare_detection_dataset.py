@@ -224,7 +224,7 @@ if __name__ == '__main__':
     # 从配置文件获取路径（优先使用命令行参数）
     image_dir = args.image_dir or config.get('data.processed.labeled.images') or 'data/labeled'
     label_dir = args.label_dir or config.get('data.processed.labeled.registration') or 'data'
-    output_dir = args.output_dir or config.get('data.registration.detection_output') or 'training/data/detection'
+    output_base_dir = args.output_dir or config.get('data.local_data_root') or '../data'
     random_seed = args.random_seed if args.random_seed is not None else (config.get('seed.random') or 42)
 
     # 如果配置中的路径是相对路径，转换为绝对路径
@@ -232,14 +232,14 @@ if __name__ == '__main__':
         image_dir = config.get_path('data.processed.labeled.images') or image_dir
     if label_dir and not Path(label_dir).is_absolute():
         label_dir = config.get_path('data.processed.labeled.registration') or label_dir
-    if output_dir and not Path(output_dir).is_absolute():
-        output_dir = config.get_path('data.registration.detection_output') or Path(output_dir).resolve()
+    if output_base_dir and not Path(output_base_dir).is_absolute():
+        output_base_dir = config.get_path('data.local_data_root') or Path(output_base_dir).resolve()
 
     # 执行数据集准备
     prepare_yolo_dataset(
         image_dir=str(image_dir),
         label_dir=str(label_dir),
-        output_dir=str(output_dir),
+        output_base_dir=str(output_base_dir),
         train_ratio=args.train_ratio,
         random_seed=random_seed
     )
