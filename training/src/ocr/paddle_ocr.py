@@ -43,8 +43,8 @@ class PaddleOCRWrapper:
         Args:
             use_angle_cls: 是否使用方向分类器
             lang: 语言类型 ('ch': 中文, 'en': 英文, 'japan': 日文等)
-            use_gpu: 是否使用GPU
-            show_log: 是否显示日志
+            use_gpu: 是否使用GPU（通过环境变量控制）
+            show_log: 是否显示日志（已弃用，通过环境变量控制）
             det_model_dir: 检测模型路径
             rec_model_dir: 识别模型路径
             cls_model_dir: 分类模型路径
@@ -53,16 +53,32 @@ class PaddleOCRWrapper:
         self.lang = lang
         self.use_gpu = use_gpu
         
-        # 初始化 PaddleOCR
-        self.ocr = PaddleOCR(
-            use_angle_cls=use_angle_cls,
-            lang=lang,
-            use_gpu=use_gpu,
-            show_log=show_log,
-            det_model_dir=det_model_dir,
-            rec_model_dir=rec_model_dir,
-            cls_model_dir=cls_model_dir,
-        )
+        # 通过环境变量控制设备使用
+        # PaddleOCR 新版本使用环境变量控制 GPU/CPU
+        if use_gpu:
+            os.environ['FLAGS_use_gpu'] = 'true'
+        else:
+            os.environ['FLAGS_use_gpu'] = 'false'
+        
+        # 通过环境变量控制日志输出
+        if not show_log:
+            os.environ['FLAGS_ocr_debug_mode'] = '0'
+        
+        # 初始化 PaddleOCR（只传递支持的参数）
+        ocr_params = {
+            'use_angle_cls': use_angle_cls,
+            'lang': lang,
+        }
+        
+        # 添加可选的模型路径参数
+        if det_model_dir:
+            ocr_params['det_model_dir'] = det_model_dir
+        if rec_model_dir:
+            ocr_params['rec_model_dir'] = rec_model_dir
+        if cls_model_dir:
+            ocr_params['cls_model_dir'] = cls_model_dir
+        
+        self.ocr = PaddleOCR(**ocr_params)
         
         print(f"PaddleOCR 初始化完成 (语言: {lang}, GPU: {use_gpu})")
     
@@ -85,8 +101,8 @@ class PaddleOCRWrapper:
         # 加载图片
         img_array = self._load_image(image)
         
-        # 执行OCR
-        result = self.ocr.ocr(img_array, cls=self.use_angle_cls)
+        # 执行OCR（新版本不支持 cls 参数）
+        result = self.ocr.ocr(img_array)
         
         if not result or result[0] is None:
             if return_details:
@@ -113,7 +129,7 @@ class PaddleOCRWrapper:
             包含文本框和识别结果的列表
         """
         img_array = self._load_image(image)
-        result = self.ocr.ocr(img_array, cls=self.use_angle_cls)
+        result = self.ocr.ocr(img_array)
         
         if not result or result[0] is None:
             return []
@@ -171,12 +187,23 @@ class PaddleOCRWrapper:
             包含详细信息的字典列表
         """
         details = []
+        
+        # 检查结果格式
+        if not result or not result[0]:
+            return details
+        
         for line in result[0]:
             if line:
                 box = line[0]  # 文本框坐标 [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
-                text_info = line[1]  # (text, confidence)
-                text = text_info[0]
-                confidence = float(text_info[1])
+                text_info = line[1]  # (text, confidence) 或 text
+                
+                # 处理不同的返回格式
+                if isinstance(text_info, (list, tuple)):
+                    text = text_info[0]
+                    confidence = float(text_info[1]) if len(text_info) > 1 else 0.0
+                else:
+                    text = str(text_info)
+                    confidence = 0.0
                 
                 details.append({
                     'text': text,

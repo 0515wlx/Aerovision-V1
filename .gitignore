@@ -217,5 +217,6 @@ training/logs/
 
 # Datasets
 /FGVC_Aircraft_dataset/
-training/data/
-training/checkpoints/
+data
+checkpoints
+runs
