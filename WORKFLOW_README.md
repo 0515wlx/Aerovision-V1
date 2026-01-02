@@ -27,7 +27,7 @@
 
 ## 配置文件
 
-所有训练参数统一配置在 [`configs/training_params.yaml`](configs/training_params.yaml) 文件中。
+所有训练参数统一配置在 [`training/configs/config/training_params.yaml`](training/configs/config/training_params.yaml) 文件中。
 
 主要配置项：
 
@@ -104,7 +104,7 @@ python training/scripts/train_detection_model.py \
 python app/test_inference.py \
     --model training/checkpoints/registration_detection/weights/best.pt \
     --image data/labeled/example.jpg \
-    --config configs/inference.yaml
+    --config training/configs/config/inference.yaml
 ```
 
 ## 使用主workflow脚本
@@ -112,7 +112,7 @@ python app/test_inference.py \
 也可以使用 [`run_workflow.py`](run_workflow.py) 脚本一次性运行整个workflow：
 
 ```bash
-python run_workflow.py --config configs/training_params.yaml
+python run_workflow.py --config training/configs/config/training_params.yaml
 ```
 
 可选参数：
@@ -122,7 +122,7 @@ python run_workflow.py --config configs/training_params.yaml
 
 ## 调参
 
-所有训练参数都在 [`configs/training_params.yaml`](configs/training_params.yaml) 文件中，修改该文件即可调整训练参数。
+所有训练参数都在 [`training/configs/config/training_params.yaml`](training/configs/config/training_params.yaml) 文件中，修改该文件即可调整训练参数。
 
 主要调参项：
 

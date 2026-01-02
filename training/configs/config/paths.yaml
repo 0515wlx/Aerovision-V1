@@ -1,0 +1,84 @@
+# 路径配置模块
+# ⚠️ 重要：所有相对路径都相对于 /training/configs 目录
+
+# 数据路径详细配置
+data:
+  # 原始数据路径（服务器）
+  server_data_root: "mnt/disk/Aerovision-V1-data"
+
+  # 本地数据路径
+  local_data_root: "../data"
+
+  # 原始图片
+  raw: "../data/raw"
+
+  # 处理后数据
+  processed:
+    root: "../data/processed"
+    aircraft_crop:
+      root: "../data/processed/aircraft_crop"
+      unsorted: "../data/processed/aircraft_crop/unsorted"
+      train: "../data/processed/aircraft_crop/train"
+      val: "../data/processed/aircraft_crop/val"
+      test: "../data/processed/aircraft_crop/test"
+
+  # 注册号数据
+  registration:
+    area: "../data/registration/registration_area"
+    crops: "../data/registration/crops"
+
+# 标注文件路径
+labels:
+  root: "../data/labels"
+  # 主标注文件
+  main: "../data/labels/aircraft_labels.csv"
+  # 类别映射文件
+  type_classes: "../data/labels/type_classes.json"
+  airline_classes: "../data/labels/airline_classes.json"
+  # 数据集划分
+  train: "../data/labels/train.csv"
+  val: "../data/labels/val.csv"
+  test: "../data/labels/test.csv"
+  # 注册号标注（YOLO格式）
+  registration: "../data/labels/registration"
+
+# 模型文件路径
+models:
+  root: "../model"
+  # 预训练模型
+  pretrained:
+    yolov8n: "../model/yolov8n.pt"
+    yolov8s: "../model/yolov8s.pt"
+    yolov8m: "../model/yolov8m.pt"
+    yolov8l: "../model/yolov8l.pt"
+    yolov8x: "../model/yolov8x.pt"
+  # 训练好的模型
+  trained:
+    aircraft_detector: "../model/aircraft_detector.pt"
+    type_classifier: "../model/type_classifier.pth"
+    registration_detector: "../model/registration_detector.pt"
+
+# 检查点路径
+checkpoints:
+  root: "../checkpoints"
+  # 各阶段检查点
+  stage1: "../checkpoints/stage1"
+  stage2: "../checkpoints/stage2"
+  stage3: "../checkpoints/stage3"
+  stage4: "../checkpoints/stage4"
+  stage5: "../checkpoints/stage5"
+  stage6: "../checkpoints/stage6"
+
+# 日志路径
+logs:
+  root: "../logs"
+  # 训练日志
+  training: "../logs/training"
+  # TensorBoard日志
+  tensorboard: "../logs/tensorboard"
+  # WandB日志
+  wandb: "../logs/wandb"
+  # 审查日志
+  review: "../logs/review"
+  # 输出文件模板
+  crop_review: "../logs/crop_review_{timestamp}.png"

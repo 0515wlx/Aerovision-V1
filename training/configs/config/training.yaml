@@ -1,0 +1,211 @@
+# 模型训练配置
+# ⚠️ 重要：相对路径相对于 /training/configs 目录
+
+# 基础训练参数
+basic:
+  # 批次大小
+  batch_size: 32
+
+  # 学习率
+  learning_rate: 0.001
+
+  # 训练轮数
+  num_epochs: 100
+
+  # 图片尺寸
+  image_size: 224
+
+  # 数据加载线程数
+  num_workers: 4
+
+  # 是否使用混合精度训练
+  mixed_precision: true
+
+  # 梯度累积步数
+  gradient_accumulation_steps: 1
+
+# 优化器配置
+optimizer:
+  # 优化器类型: adam, adamw, sgd
+  type: "adamw"
+
+  # AdamW参数
+  adamw:
+    lr: 0.001
+    betas: [0.9, 0.999]
+    eps: 1.0e-8
+    weight_decay: 0.01
+
+  # SGD参数
+  sgd:
+    lr: 0.01
+    momentum: 0.9
+    weight_decay: 0.0001
+    nesterov: true
+
+# 学习率调度器
+scheduler:
+  # 调度器类型: cosine, step, plateau, onecycle
+  type: "cosine"
+
+  # Cosine Annealing
+  cosine:
+    T_max: 100
+    eta_min: 1.0e-6
+    warmup_epochs: 5
+
+  # Step LR
+  step:
+    step_size: 30
+    gamma: 0.1
+
+  # Reduce on Plateau
+  plateau:
+    mode: "min"
+    factor: 0.1
+    patience: 10
+    min_lr: 1.0e-6
+
+  # OneCycle
+  onecycle:
+    max_lr: 0.01
+    pct_start: 0.3
+    anneal_strategy: "cos"
+
+# 正则化
+regularization:
+  # Dropout
+  dropout: 0.1
+
+  # DropPath (Stochastic Depth)
+  drop_path: 0.1
+
+  # Label Smoothing
+  label_smoothing: 0.1
+
+  # Mixup
+  mixup_alpha: 0.2
+
+  # CutMix
+  cutmix_alpha: 1.0
+
+  # 随机擦除
+  random_erasing: 0.25
+
+# 早停
+early_stopping:
+  # 是否启用
+  enabled: true
+
+  # 耐心值（多少个epoch没有改善就停止）
+  patience: 15
+
+  # 监控指标: loss, accuracy, f1
+  monitor: "val_loss"
+
+  # 模式: min, max
+  mode: "min"
+
+  # 最小改善量
+  min_delta: 0.0001
+
+# 检查点保存
+checkpoint:
+  # 保存目录
+  save_dir: "../checkpoints"
+
+  # 保存频率（每N个epoch保存一次）
+  save_frequency: 5
+
+  # 保存最佳模型
+  save_best: true
+
+  # 保存最后一个模型
+  save_last: true
+
+  # 最多保存N个检查点
+  max_keep: 5
+
+  # 监控指标
+  monitor: "val_accuracy"
+  mode: "max"
+
+# 验证配置
+validation:
+  # 验证频率（每N个epoch验证一次）
+  frequency: 1
+
+  # 验证批次大小
+  batch_size: 64
+
+# 日志配置
+logging:
+  # 日志频率（每N个step记录一次）
+  log_frequency: 10
+
+  # 是否记录学习率
+  log_lr: true
+
+  # 是否记录梯度范数
+  log_grad_norm: true
+
+# 多任务学习（Stage 3+）
+multitask:
+  # 是否启用多任务
+  enabled: false
+
+  # 任务权重
+  task_weights:
+    type_classification: 1.0
+    airline_classification: 1.0
+    quality_regression: 1.0
+
+  # 损失函数权重策略: fixed, uncertainty, dwa
+  loss_weight_strategy: "uncertainty"
+
+# 模型配置
+model:
+  # backbone类型: convnext, swin, resnet
+  backbone: "convnext"
+
+  # ConvNeXt配置
+  convnext:
+    model_name: "convnext_base"  # tiny, small, base, large
+    pretrained: true
+    drop_path_rate: 0.1
+
+  # Swin Transformer配置
+  swin:
+    model_name: "swin_base_patch4_window7_224"
+    pretrained: true
+    drop_path_rate: 0.1
+
+  # 分类头配置
+  classifier:
+    hidden_dim: 512
+    dropout: 0.1
+    num_layers: 2
+
+# Stage特定配置
+stage_configs:
+  # Stage 2: 单模型单任务（机型分类）
+  stage2:
+    num_classes: null  # 从数据集自动推断
+    loss: "cross_entropy"
+
+  # Stage 3: 单模型多Head（机型+航司）
+  stage3:
+    num_type_classes: null
+    num_airline_classes: null
+    shared_backbone: true
+
+  # Stage 4: 加清晰度Head
+  stage4:
+    quality_head: true
+    quality_loss: "mse"
+
+  # Stage 5: 模型杂交（ConvNeXt + Swin）
+  stage5:
+    use_ensemble: true
+    ensemble_method: "weighted_avg"  # weighted_avg, voting, stacking
+    model_weights: [0.5, 0.5]

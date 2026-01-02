@@ -216,7 +216,7 @@ python training/scripts/train_detection_model.py \
 python app/test_inference.py \
     --model training/checkpoints/registration_detection/weights/best.pt \
     --image data/labeled/example.jpg \
-    --config configs/inference.yaml
+    --config training/configs/config/inference.yaml
 ```
 
 ---

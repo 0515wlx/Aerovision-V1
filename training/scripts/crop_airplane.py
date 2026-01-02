@@ -8,9 +8,9 @@ import shutil
 from tqdm import tqdm
 import sys
 
-# 添加config模块路径
+# 添加configs模块路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import load_config
+from configs import load_config
 
 
 def crop_aircraft(

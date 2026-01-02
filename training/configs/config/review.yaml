@@ -1,0 +1,78 @@
+# 裁剪结果审查配置
+# ⚠️ 重要：相对路径相对于 /training/configs 目录
+
+# 审查参数
+review:
+  # 随机查看的样本数量
+  n_samples: 20
+
+  # 网格显示配置
+  grid_cols: 5  # 网格列数
+  grid_rows: null  # 网格行数，null表示自动计算
+
+  # 图形尺寸
+  fig_width: 15  # 图形宽度（英寸）
+  row_height: 3  # 每行高度（英寸）
+
+  # 输出分辨率
+  dpi: 150
+
+  # 标题配置
+  title_length: 15  # 标题显示长度（字符数）
+  show_filename: true  # 是否显示文件名
+  show_size: true  # 是否显示图片尺寸
+
+  # 是否显示边框
+  show_border: true
+  border_color: "gray"
+  border_width: 1
+
+# 输出配置
+output:
+  # 保存路径模板（{timestamp}会被替换为实际时间）
+  save_path: "../logs/crop_review_{timestamp}.png"
+
+  # 输出格式
+  format: "png"  # png, jpg, pdf
+
+  # 是否自动打开
+  auto_open: false
+
+  # 是否同时保存到多个格式
+  multi_format: false
+  formats: ["png", "pdf"]
+
+# 统计信息
+statistics:
+  # 是否显示统计信息
+  enabled: true
+
+  # 统计内容
+  show_total_count: true  # 总数
+  show_size_distribution: true  # 尺寸分布
+  show_aspect_ratio: true  # 宽高比分布
+
+  # 统计保存路径
+  save_path: "../logs/crop_statistics.json"
+
+# 过滤器
+filter:
+  # 最小尺寸过滤
+  min_width: null
+  min_height: null
+
+  # 最大尺寸过滤
+  max_width: null
+  max_height: null
+
+  # 宽高比过滤
+  min_aspect_ratio: null  # 例如：0.5 (宽:高 = 1:2)
+  max_aspect_ratio: null  # 例如：2.0 (宽:高 = 2:1)
+
+# 排序方式
+sort:
+  # 排序依据: name, size, aspect_ratio, random
+  by: "random"
+
+  # 是否降序
+  descending: false

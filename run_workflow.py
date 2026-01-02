@@ -180,7 +180,7 @@ def main() -> None:
     parser.add_argument(
         '--config',
         type=str,
-        default='configs/training_params.yaml',
+        default='training/configs/config/training_params.yaml',
         help='训练参数配置文件路径'
     )
     parser.add_argument(

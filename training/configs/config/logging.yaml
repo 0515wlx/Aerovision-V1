@@ -1,0 +1,257 @@
+# 日志配置
+# ⚠️ 重要：相对路径相对于 /training/configs 目录
+
+# 基础日志配置
+logging:
+  # 日志级别: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: "INFO"
+
+  # 日志格式
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+  # 日期格式
+  date_format: "%Y-%m-%d %H:%M:%S"
+
+  # 是否保存到文件
+  save_to_file: true
+
+  # 日志文件路径
+  log_file: "../logs/aerovision.log"
+
+  # 是否在控制台输出
+  console_output: true
+
+  # 控制台日志级别（可以与文件日志级别不同）
+  console_level: "INFO"
+
+# 文件日志配置
+file:
+  # 是否启用文件日志
+  enabled: true
+
+  # 日志文件路径
+  path: "../logs"
+
+  # 日志文件名模板
+  filename: "aerovision_{timestamp}.log"
+
+  # 日志轮转
+  rotation:
+    # 是否启用轮转
+    enabled: true
+
+    # 轮转策略: size, time
+    strategy: "size"
+
+    # 大小轮转（当日志文件超过此大小时轮转）
+    max_bytes: 10485760  # 10MB
+
+    # 保留的备份数量
+    backup_count: 5
+
+    # 时间轮转（每天、每周、每月）
+    when: "midnight"  # midnight, W0-W6, midnight
+    interval: 1
+
+  # 日志编码
+  encoding: "utf-8"
+
+# 训练日志配置
+training:
+  # 是否启用训练日志
+  enabled: true
+
+  # 日志频率（每N个step记录一次）
+  log_frequency: 10
+
+  # 是否记录学习率
+  log_lr: true
+
+  # 是否记录梯度
+  log_gradients: false
+
+  # 是否记录参数
+  log_parameters: false
+
+  # 是否记录激活值
+  log_activations: false
+
+  # 训练日志保存路径
+  save_path: "../logs/training"
+
+  # CSV日志
+  csv_log:
+    enabled: true
+    path: "../logs/training/metrics.csv"
+
+  # JSON日志
+  json_log:
+    enabled: false
+    path: "../logs/training/metrics.json"
+
+# TensorBoard配置
+tensorboard:
+  # 是否启用TensorBoard
+  enabled: true
+
+  # 日志目录
+  log_dir: "../logs/tensorboard"
+
+  # 刷新频率（秒）
+  flush_secs: 30
+
+  # 记录内容
+  log_scalars: true  # 标量（loss, accuracy等）
+  log_images: true  # 图片
+  log_histograms: false  # 直方图（权重分布）
+  log_embeddings: false  # 嵌入向量
+  log_graph: false  # 模型图
+
+  # 图片记录配置
+  images:
+    num_images: 8  # 每次记录的图片数量
+    log_frequency: 100  # 每N个step记录一次
+
+# Weights & Biases配置
+wandb:
+  # 是否启用W&B
+  enabled: false
+
+  # 项目名称
+  project: "aerovision-v1"
+
+  # 实体（用户名或团队名）
+  entity: null
+
+  # 运行名称
+  name: null  # null表示自动生成
+
+  # 运行ID
+  id: null  # null表示自动生成
+
+  # 笔记
+  notes: null
+
+  # 标签
+  tags: []
+
+  # 运行组
+  group: null
+
+  # 运行模式: online, offline, disabled
+  mode: "online"
+
+  # 保存目录
+  dir: "../logs/wandb"
+
+  # 保存代码
+  save_code: true
+
+  # 日志频率
+  log_frequency: 10
+
+  # 监控系统资源
+  monitor_gym: true
+
+  # 记录模型
+  watch_model:
+    enabled: false
+    log: "gradients"  # gradients, parameters, all
+    log_freq: 100
+
+# 性能分析
+profiling:
+  # 是否启用性能分析
+  enabled: false
+
+  # 分析器类型: pytorch, cprofile, line_profiler
+  profiler: "pytorch"
+
+  # PyTorch Profiler配置
+  pytorch:
+    # 是否记录CPU
+    with_stack: true
+
+    # 是否记录内存
+    profile_memory: true
+
+    # 是否记录CUDA
+    with_flops: false
+
+    # 保存路径
+    save_path: "../logs/profiling"
+
+  # 分析频率（每N个step分析一次）
+  profile_frequency: 100
+
+# 错误日志
+error:
+  # 是否单独记录错误
+  separate_file: true
+
+  # 错误日志路径
+  error_log_file: "../logs/errors.log"
+
+  # 是否发送错误通知（邮件、webhook等）
+  send_notification: false
+
+  # 错误级别: WARNING, ERROR, CRITICAL
+  min_level: "ERROR"
+
+# 调试配置
+debug:
+  # 是否启用调试模式
+  enabled: false
+
+  # 调试日志级别
+  level: "DEBUG"
+
+  # 是否记录调用栈
+  log_traceback: true
+
+  # 是否记录所有变量
+  log_variables: false
+
+  # 调试日志保存路径
+  debug_log_file: "../logs/debug.log"
+
+# 日志过滤
+filters:
+  # 忽略的logger名称
+  ignore_loggers: []
+
+  # 忽略的消息（正则表达式）
+  ignore_messages: []
+
+  # 只记录的logger名称
+  only_loggers: []
+
+# 格式化配置
+formatters:
+  # 简单格式
+  simple:
+    format: "%(levelname)s - %(message)s"
+
+  # 详细格式
+  verbose:
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s"
+
+  # JSON格式
+  json:
+    enabled: false
+    include_time: true
+    include_level: true
+    include_name: true
+    include_message: true
+
+# 性能优化
+performance:
+  # 是否使用异步日志
+  async_logging: false
+
+  # 日志缓冲区大小
+  buffer_size: 1024
+
+  # 是否压缩旧日志
+  compress_old_logs: true
+  compression_format: "gz"  # gz, bz2, xz
