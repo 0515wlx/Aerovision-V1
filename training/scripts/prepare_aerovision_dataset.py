@@ -9,6 +9,27 @@ Aerovision-V1 数据集准备脚本
 2. 从labeled目录复制图片到对应的类别目录
 3. 按比例划分train/val/test
 4. 生成类别映射文件
+
+配置说明：
+本脚本使用新的模块化配置系统，自动加载以下配置模块：
+- paths.yaml: 路径配置 (labels.*, data.*)
+- base.yaml: 基础配置 (seed.*)
+
+配置项：
+- labels.main: 标注文件路径 (默认: ../data/processed/labeled/labels.csv)
+- data.processed.labeled.images: 图片目录 (默认: ../data/processed/labeled/images)
+- data.processed.aircraft_crop: 输出目录 (默认: ../data/processed/aircraft_crop)
+- seed.random: 随机种子 (默认: 42)
+
+使用方法：
+  # 使用默认配置
+  python prepare_aerovision_dataset.py
+
+  # 指定自定义路径
+  python prepare_aerovision_dataset.py --labels-csv path/to/labels.csv
+
+  # 指定自定义配置文件
+  python prepare_aerovision_dataset.py --config my_config.yaml
 """
 
 import argparse
@@ -18,11 +39,17 @@ import logging
 import os
 import random
 import shutil
+import sys
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 import yaml
+
+# 添加configs模块路径
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from configs import load_config
 
 # 配置日志
 logging.basicConfig(
@@ -72,10 +99,14 @@ class AerovisionDatasetPreparer:
                 f"当前为{train_ratio + val_ratio + test_ratio}"
             )
 
-        # 设置输出路径
-        self.processed_dir = self.output_dir / "processed" / "aircraft"
-        self.labels_dir = self.output_dir / "processed" / "labels"
+        # 创建带时间戳的输出目录
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.dataset_root = self.output_dir / "processed" / f"aerovision_{timestamp}"
+        self.processed_dir = self.dataset_root / "aircraft"
+        self.labels_dir = self.dataset_root / "labels"
         self.configs_dir = self.output_dir.parent / "configs"
+
+        logger.info(f"数据集输出目录: {self.dataset_root}")
 
         # 类别映射（类别名 -> 类别ID）
         self.class_to_id: Dict[str, int] = {}
@@ -342,7 +373,8 @@ class AerovisionDatasetPreparer:
         """创建YOLOv8配置文件"""
         logger.info("创建YOLOv8配置文件...")
 
-        config_file = self.configs_dir / "aircraft_classify.yaml"
+        # 将配置文件保存在数据集根目录
+        config_file = self.dataset_root / "dataset_config.yaml"
 
         # 准备配置数据
         config = {
@@ -426,25 +458,44 @@ class AerovisionDatasetPreparer:
 def main() -> None:
     """主函数"""
     parser = argparse.ArgumentParser(
-        description="从labels.csv和labeled目录创建YOLOv8分类格式的数据集"
+        description="从labels.csv和labeled目录创建YOLOv8分类格式的数据集",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例:
+  # 使用默认配置
+  python prepare_aerovision_dataset.py
+
+  # 指定划分比例
+  python prepare_aerovision_dataset.py --train-ratio 0.7 --val-ratio 0.15 --test-ratio 0.15
+
+  # 指定自定义路径
+  python prepare_aerovision_dataset.py --labels-csv path/to/labels.csv --images-dir path/to/images
+
+  # 使用自定义配置文件
+  python prepare_aerovision_dataset.py --config my_config.yaml
+
+配置说明:
+  本脚本使用模块化配置系统，自动加载 paths.yaml 和 base.yaml
+  可以通过命令行参数覆盖配置文件中的值
+        """
     )
     parser.add_argument(
         '--labels-csv',
         type=str,
-        default='data/labels.csv',
-        help='labels.csv文件路径'
+        default=None,
+        help='labels.csv文件路径（默认从配置文件读取）'
     )
     parser.add_argument(
         '--images-dir',
         type=str,
-        default='data/labeled',
-        help='原始图片目录（labeled目录）'
+        default=None,
+        help='原始图片目录（默认从配置文件读取）'
     )
     parser.add_argument(
         '--output-dir',
         type=str,
-        default='data',
-        help='输出目录路径 (默认: data)'
+        default=None,
+        help='输出目录路径（默认从配置文件读取）'
     )
     parser.add_argument(
         '--train-ratio',
@@ -467,21 +518,59 @@ def main() -> None:
     parser.add_argument(
         '--random-seed',
         type=int,
-        default=42,
-        help='随机种子 (默认: 42)'
+        default=None,
+        help='随机种子（默认从配置文件读取）'
+    )
+    parser.add_argument(
+        '--config',
+        type=str,
+        default=None,
+        help='自定义配置文件路径'
     )
 
     args = parser.parse_args()
 
+    # 加载配置
+    if args.config:
+        config = load_config(args.config)
+    else:
+        # 只加载需要的模块
+        config = load_config(modules=['paths'], load_all_modules=False)
+
+    # 从配置文件获取路径（优先使用命令行参数）
+    labels_csv = args.labels_csv or config.get('labels.main') or config.get('paths.main_labels')
+    images_dir = args.images_dir or config.get('data.processed.labeled.images') or config.get('paths.aircraft_crop_unsorted')
+    output_dir = args.output_dir or config.get('data.local_data_root') or '../data'
+    random_seed = args.random_seed if args.random_seed is not None else (config.get('seed.random') or 42)
+
+    # 如果配置中的路径是相对路径，转换为绝对路径
+    if labels_csv and not Path(labels_csv).is_absolute():
+        labels_csv = config.get_path('labels.main') or config.get_path('paths.main_labels')
+    if images_dir and not Path(images_dir).is_absolute():
+        images_dir = config.get_path('data.processed.labeled.images') or config.get_path('paths.aircraft_crop_unsorted')
+    if output_dir and not Path(output_dir).is_absolute():
+        output_dir = config.get_path('data.local_data_root') or Path('../data').resolve()
+
+    logger.info("=" * 60)
+    logger.info("配置信息:")
+    logger.info(f"  标注文件: {labels_csv}")
+    logger.info(f"  图片目录: {images_dir}")
+    logger.info(f"  输出目录: {output_dir}")
+    logger.info(f"  训练集比例: {args.train_ratio}")
+    logger.info(f"  验证集比例: {args.val_ratio}")
+    logger.info(f"  测试集比例: {args.test_ratio}")
+    logger.info(f"  随机种子: {random_seed}")
+    logger.info("=" * 60)
+
     # 创建数据集准备器
     preparer = AerovisionDatasetPreparer(
-        labels_csv=args.labels_csv,
-        images_dir=args.images_dir,
-        output_dir=args.output_dir,
+        labels_csv=str(labels_csv),
+        images_dir=str(images_dir),
+        output_dir=str(output_dir),
         train_ratio=args.train_ratio,
         val_ratio=args.val_ratio,
         test_ratio=args.test_ratio,
-        random_seed=args.random_seed
+        random_seed=random_seed
     )
 
     # 执行数据集准备

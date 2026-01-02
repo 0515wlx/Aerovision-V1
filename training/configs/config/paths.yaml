@@ -35,6 +35,7 @@ data:
   registration:
     area: "../data/processed/labeled/registration/registration_area"
     crops: "../data/registration/crops"
+    detection_output: "../data/detection"  # YOLOv8检测数据集输出目录
 
 # 标注文件路径
 labels:
