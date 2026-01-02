@@ -3,6 +3,20 @@
 """
 数据集划分脚本 - 将标注好的数据集划分为 train/val/test
 
+配置说明：
+-----------
+本脚本使用新的模块化配置系统，自动加载以下配置模块：
+- paths.yaml: 路径配置 (labels.*, data.*)
+- base.yaml: 基础配置 (seed.*, paths.*)
+
+配置键映射：
+-----------
+- 标注文件: labels.main 或 paths.main_labels
+- 图片目录: data.processed.aircraft_crop.unsorted 或 paths.aircraft_crop_unsorted
+- 注册号标注目录: data.registration.area 或 paths.registration_area
+- 类别映射输出: labels.type_classes, labels.airline_classes
+- 随机种子: seed.random
+
 功能：
 1. 从 aircraft_labels.csv 读取标注
 2. 按比例划分数据集（70%/15%/15%）
@@ -10,17 +24,25 @@
 4. 生成 train.csv, val.csv, test.csv
 5. 将图片复制到对应目录
 
-Usage:
-    # 基本用法
-    python split_dataset.py
+使用方法：
+-----------
+1. 使用默认配置:
+   python split_dataset.py
 
-    # 自定义参数
-    python split_dataset.py --labels training/data/labels/aircraft_labels.csv --train-ratio 0.7 --val-ratio 0.15 --test-ratio 0.15
+2. 指定参数:
+   python split_dataset.py --train-ratio 0.7 --val-ratio 0.15 --test-ratio 0.15
+
+3. 指定标注文件:
+   python split_dataset.py --labels data/labels/aircraft_labels.csv
+
+4. 使用自定义配置:
+   python split_dataset.py --config path/to/custom_config.yaml
 """
 
 import argparse
 import logging
 import shutil
+import sys
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -28,6 +50,10 @@ from typing import Dict, List, Tuple
 import random
 
 import pandas as pd
+
+# 添加configs模块路径
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from configs import load_config
 
 # 配置日志
 logging.basicConfig(
@@ -462,26 +488,44 @@ def main() -> None:
     """主函数"""
     parser = argparse.ArgumentParser(
         description="将标注好的数据集划分为 train/val/test",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例:
+  # 使用默认配置
+  python split_dataset.py
+
+  # 指定划分比例
+  python split_dataset.py --train-ratio 0.7 --val-ratio 0.15 --test-ratio 0.15
+
+  # 指定标注文件和图片目录
+  python split_dataset.py --labels data/labels/aircraft_labels.csv --images data/processed/aircraft_crop/unsorted
+
+  # 使用自定义配置文件
+  python split_dataset.py --config my_config.yaml
+
+配置说明:
+  本脚本使用模块化配置系统，自动加载 paths.yaml 和 base.yaml
+  可以通过命令行参数覆盖配置文件中的值
+        """
     )
 
     parser.add_argument(
         '--labels',
         type=str,
-        default='../data/labels.csv',
-        help='标注文件路径'
+        default=None,
+        help='标注文件路径（默认从配置文件读取）'
     )
     parser.add_argument(
         '--images',
         type=str,
-        default='../data/processed/labeled',
-        help='图片目录路径'
+        default=None,
+        help='图片目录路径（默认从配置文件读取）'
     )
     parser.add_argument(
         '--registration',
         type=str,
-        default='../data/registration/registration_area',
-        help='注册号区域标注目录（YOLO格式txt文件）'
+        default=None,
+        help='注册号区域标注目录（默认从配置文件读取）'
     )
     parser.add_argument(
         '--train-ratio',
@@ -504,21 +548,59 @@ def main() -> None:
     parser.add_argument(
         '--seed',
         type=int,
-        default=42,
-        help='随机种子'
+        default=None,
+        help='随机种子（默认从配置文件读取）'
+    )
+    parser.add_argument(
+        '--config',
+        type=str,
+        default=None,
+        help='自定义配置文件路径'
     )
 
     args = parser.parse_args()
 
+    # 加载配置
+    if args.config:
+        config = load_config(args.config)
+    else:
+        # 只加载需要的模块
+        config = load_config(modules=['paths'], load_all_modules=False)
+
+    # 从配置文件获取路径（优先使用命令行参数）
+    labels_file = args.labels or config.get('labels.main') or config.get('paths.main_labels')
+    images_dir = args.images or config.get('data.processed.labeled.images') or config.get('paths.aircraft_crop_unsorted')
+    registration_dir = args.registration or config.get('data.registration.area') or config.get('paths.registration_area')
+    random_seed = args.seed if args.seed is not None else (config.get('seed.random') or 42)
+
+    # 如果配置中的路径是相对路径，转换为绝对路径
+    if labels_file and not Path(labels_file).is_absolute():
+        labels_file = config.get_path('labels.main') or config.get_path('paths.main_labels')
+    if images_dir and not Path(images_dir).is_absolute():
+        images_dir = config.get_path('data.processed.labeled.images') or config.get_path('paths.aircraft_crop_unsorted')
+    if registration_dir and not Path(registration_dir).is_absolute():
+        registration_dir = config.get_path('data.registration.area') or config.get_path('paths.registration_area')
+
+    logger.info("=" * 60)
+    logger.info("配置信息:")
+    logger.info(f"  标注文件: {labels_file}")
+    logger.info(f"  图片目录: {images_dir}")
+    logger.info(f"  注册号标注目录: {registration_dir}")
+    logger.info(f"  训练集比例: {args.train_ratio}")
+    logger.info(f"  验证集比例: {args.val_ratio}")
+    logger.info(f"  测试集比例: {args.test_ratio}")
+    logger.info(f"  随机种子: {random_seed}")
+    logger.info("=" * 60)
+
     # 创建数据集划分器
     splitter = DatasetSplitter(
-        labels_file=args.labels,
-        images_dir=args.images,
-        registration_dir=args.registration,
+        labels_file=str(labels_file),
+        images_dir=str(images_dir),
+        registration_dir=str(registration_dir) if registration_dir else None,
         train_ratio=args.train_ratio,
         val_ratio=args.val_ratio,
         test_ratio=args.test_ratio,
-        random_seed=args.seed
+        random_seed=random_seed
     )
 
     # 执行数据集划分

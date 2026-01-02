@@ -15,6 +15,15 @@ data:
   # 处理后数据
   processed:
     root: "../data/processed"
+
+    # 标注后的数据（用于数据集划分）
+    labeled:
+      root: "../data/processed/labeled"
+      images: "../data/processed/labeled/images"
+      labels: "../data/processed/labeled/labels.csv"
+      registration: "../data/processed/labeled/registration/registration_area"
+
+    # 裁剪后的飞机图片
     aircraft_crop:
       root: "../data/processed/aircraft_crop"
       unsorted: "../data/processed/aircraft_crop/unsorted"
@@ -24,23 +33,23 @@ data:
 
   # 注册号数据
   registration:
-    area: "../data/registration/registration_area"
+    area: "../data/processed/labeled/registration/registration_area"
     crops: "../data/registration/crops"
 
 # 标注文件路径
 labels:
-  root: "../data/labels"
-  # 主标注文件
-  main: "../data/labels/aircraft_labels.csv"
+  root: "../data/processed/labeled"
+  # 主标注文件（实际位置）
+  main: "../data/processed/labeled/labels.csv"
   # 类别映射文件
-  type_classes: "../data/labels/type_classes.json"
-  airline_classes: "../data/labels/airline_classes.json"
-  # 数据集划分
-  train: "../data/labels/train.csv"
-  val: "../data/labels/val.csv"
-  test: "../data/labels/test.csv"
+  type_classes: "../data/processed/labeled/type_classes.json"
+  airline_classes: "../data/processed/labeled/airline_classes.json"
+  # 数据集划分后的标注文件（会在split后生成）
+  train: "../data/processed/labeled/splits/train.csv"
+  val: "../data/processed/labeled/splits/val.csv"
+  test: "../data/processed/labeled/splits/test.csv"
   # 注册号标注（YOLO格式）
-  registration: "../data/labels/registration"
+  registration: "../data/processed/labeled/registration/registration_area"
 
 # 模型文件路径
 models:
