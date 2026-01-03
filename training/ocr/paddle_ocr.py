@@ -30,6 +30,7 @@ class PaddleOCRWrapper:
     def __init__(
         self,
         use_angle_cls: bool = True,
+        # TODO: 仅需识别英文字母 中划线 和 数字即可
         lang: str = 'ch',
         use_gpu: bool = False,
         show_log: bool = False,
@@ -305,6 +306,8 @@ def create_ocr(
 if __name__ == '__main__':
     # 创建OCR实例
     ocr = create_ocr(lang='ch', use_gpu=False)
+
+    # TODO: 图片传入方式为 numpy 数组，按照 txt 从对应图片中截取
     
     # 识别单张图片
     # result = ocr.ocr_text('test_image.jpg')
