@@ -426,39 +426,44 @@ class AircraftClassifierTrainer:
             self.model = YOLO(self.args.resume)
         else:
             model_path = self.config['model']
+            model_dir = self.training_root / 'model'
+            model_dir.mkdir(parents=True, exist_ok=True)
 
-            # If model path is not absolute and doesn't exist locally
-            if not Path(model_path).is_absolute() and not Path(model_path).exists():
-                # This is likely a model name like "yolov8n-cls.pt"
-                # Ensure it downloads to training/model/ directory
-                model_dir = self.training_root / 'model'
-                model_dir.mkdir(parents=True, exist_ok=True)
+            # Check if model path is absolute and exists
+            if Path(model_path).is_absolute() and Path(model_path).exists():
+                # Use the absolute path directly
+                self.logger.info(f"Loading pre-trained model: {model_path}")
+                self.model = YOLO(model_path)
+            else:
+                # Model is either a name (like "yolov8n-cls.pt") or doesn't exist yet
+                # Extract just the filename
+                model_filename = Path(model_path).name
+                local_model_path = model_dir / model_filename
 
-                # Check if model exists in model directory
-                local_model_path = model_dir / model_path
                 if local_model_path.exists():
-                    model_path = str(local_model_path)
-                    self.logger.info(f"Loading local model: {model_path}")
+                    # Model exists in model directory
+                    self.logger.info(f"Loading local model: {local_model_path}")
+                    self.model = YOLO(str(local_model_path))
                 else:
-                    # Model will be downloaded by YOLO
-                    # Save current directory and change to model directory
+                    # Model doesn't exist, download it
+                    # Use absolute path to ensure it downloads to model directory
+                    self.logger.info(f"Model not found locally, will download to: {model_dir}")
+                    # Download to model directory by using the absolute path
                     import os
                     original_dir = os.getcwd()
                     try:
+                        # Change to model directory temporarily
                         os.chdir(str(model_dir))
-                        self.logger.info(f"Downloading model {model_path} to {model_dir}")
-                        self.model = YOLO(model_path)
+                        self.model = YOLO(model_filename)
+                        # Change back
                         os.chdir(original_dir)
-
-                        # Update config with actual model path
-                        self.config['model'] = str(local_model_path)
-                        return
+                        self.logger.info(f"Model downloaded to: {model_dir / model_filename}")
                     except Exception as e:
                         os.chdir(original_dir)
                         raise e
 
-            self.logger.info(f"Loading pre-trained model: {model_path}")
-            self.model = YOLO(model_path)
+                # Update config with actual model path
+                self.config['model'] = str(local_model_path)
 
     def _setup_tensorboard(self) -> None:
         """Setup TensorBoard writer for logging."""
@@ -512,6 +517,11 @@ class AircraftClassifierTrainer:
         for key, value in self.config.items():
             self.logger.info(f"  {key}: {value}")
 
+        # Ensure all YOLO downloads go to model directory
+        import os
+        original_dir = os.getcwd()
+        model_dir = self.training_root / 'model'
+
         # Prepare training arguments for YOLO
         train_args = {
             'data': self.config['data'],
@@ -544,8 +554,15 @@ class AircraftClassifierTrainer:
         start_time = datetime.now()
 
         try:
+            # Change to model directory to ensure any downloads go there
+            os.chdir(str(model_dir))
+            self.logger.info(f"Changed working directory to: {os.getcwd()}")
+
             # Train the model
             results = self.model.train(**train_args)
+
+            # Change back to original directory
+            os.chdir(original_dir)
 
             # Log final results
             self.logger.info("Training completed successfully!")
@@ -571,6 +588,8 @@ class AircraftClassifierTrainer:
                 self._save_final_checkpoint()
 
         except Exception as e:
+            # Make sure to restore working directory on error
+            os.chdir(original_dir)
             self.logger.error(f"Training failed with error: {e}", exc_info=True)
             raise
 
@@ -628,6 +647,18 @@ def main() -> None:
     4. Sets up logging
     5. Initializes and runs the trainer
     """
+    # Set environment variables for YOLO download paths
+    # This ensures models are downloaded to training/model directory
+    import os
+    training_root = Path(__file__).parent.parent
+    model_dir = training_root / 'model'
+    model_dir.mkdir(parents=True, exist_ok=True)
+
+    # Set YOLO environment variables
+    os.environ['YOLO_CONFIG_DIR'] = str(training_root / 'model')
+    # Ultralytics uses this for model downloads
+    os.environ.setdefault('TORCH_HOME', str(model_dir))
+
     # Parse arguments
     args = parse_arguments()
 
