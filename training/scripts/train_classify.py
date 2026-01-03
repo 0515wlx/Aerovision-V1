@@ -425,8 +425,40 @@ class AircraftClassifierTrainer:
             self.logger.info(f"Resuming training from checkpoint: {self.args.resume}")
             self.model = YOLO(self.args.resume)
         else:
-            self.logger.info(f"Loading pre-trained model: {self.config['model']}")
-            self.model = YOLO(self.config['model'])
+            model_path = self.config['model']
+
+            # If model path is not absolute and doesn't exist locally
+            if not Path(model_path).is_absolute() and not Path(model_path).exists():
+                # This is likely a model name like "yolov8n-cls.pt"
+                # Ensure it downloads to training/model/ directory
+                model_dir = self.training_root / 'model'
+                model_dir.mkdir(parents=True, exist_ok=True)
+
+                # Check if model exists in model directory
+                local_model_path = model_dir / model_path
+                if local_model_path.exists():
+                    model_path = str(local_model_path)
+                    self.logger.info(f"Loading local model: {model_path}")
+                else:
+                    # Model will be downloaded by YOLO
+                    # Save current directory and change to model directory
+                    import os
+                    original_dir = os.getcwd()
+                    try:
+                        os.chdir(str(model_dir))
+                        self.logger.info(f"Downloading model {model_path} to {model_dir}")
+                        self.model = YOLO(model_path)
+                        os.chdir(original_dir)
+
+                        # Update config with actual model path
+                        self.config['model'] = str(local_model_path)
+                        return
+                    except Exception as e:
+                        os.chdir(original_dir)
+                        raise e
+
+            self.logger.info(f"Loading pre-trained model: {model_path}")
+            self.model = YOLO(model_path)
 
     def _setup_tensorboard(self) -> None:
         """Setup TensorBoard writer for logging."""
@@ -655,9 +687,13 @@ def main() -> None:
         'seed': args.seed or config_obj.get('seed.random', 42),
 
         # Saving - resolve all paths relative to training/ directory
+        # Note: timestamp will be added to name later
         'project': args.project or config_obj.get('training.output.project') or '../output/classify',
         'name': args.name or config_obj.get('training.output.name') or 'aircraft_classifier',
         'save_period': args.save_period or config_obj.get('training.save_period', -1),
+
+        # Store timestamp for directory naming
+        'timestamp': None,  # Will be set later
 
         # Checkpoint directory
         'checkpoint_dir': args.checkpoint_dir or config_obj.get('checkpoints.classify') or '../ckpt/classify',
@@ -711,13 +747,17 @@ def main() -> None:
                     config['model'] = resolved_model
         # If model doesn't exist locally, YOLO will auto-download it
 
+    # Generate timestamp for this training session
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
     # Resolve project path
     project_path = config['project']
     if not Path(project_path).is_absolute():
         config['project'] = resolve_config_path(project_path)
 
-    # Generate timestamp for this training session
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    # Add timestamp to experiment name
+    config['name'] = f"{config['name']}_{timestamp}"
+    config['timestamp'] = timestamp
 
     # Resolve log directory path
     log_dir_path = config['log_dir']
@@ -743,10 +783,12 @@ def main() -> None:
     logger.info(f"Optimizer: {config['optimizer']}")
     logger.info(f"Seed: {config['seed']}")
     logger.info("=" * 60)
+    logger.info(f"Training timestamp: {timestamp}")
     logger.info(f"Output paths:")
     logger.info(f"  Project (YOLO output): {config['project']}")
-    logger.info(f"  Checkpoints: {config['checkpoint_dir']}")
-    logger.info(f"  Logs: {log_dir_path}")
+    logger.info(f"  Experiment name: {config['name']}")
+    logger.info(f"  Checkpoints: Will be created as ckpt/classify/{timestamp}/")
+    logger.info(f"  Logs: {log_dir}")
     logger.info("=" * 60)
 
     # Verify dataset paths
@@ -779,7 +821,24 @@ def main() -> None:
 
     # Initialize and run trainer
     try:
+        # Pass timestamp from config to ensure consistency
         trainer = AircraftClassifierTrainer(config, args, logger)
+
+        # Override timestamp with the one from main (for consistency)
+        trainer.timestamp = timestamp
+
+        # Recreate checkpoint directory with correct timestamp
+        checkpoint_base = args.checkpoint_dir or config.get('checkpoint_dir')
+        if checkpoint_base:
+            checkpoint_dir = trainer._resolve_training_path(checkpoint_base)
+        else:
+            checkpoint_dir = trainer.training_root / 'ckpt' / 'classify'
+        trainer.checkpoint_dir = checkpoint_dir / timestamp
+        trainer.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+        # Log final checkpoint path
+        logger.info(f"Checkpoint directory: {trainer.checkpoint_dir}")
+
         trainer.train()
 
         logger.info("=" * 60)
