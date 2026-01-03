@@ -224,3 +224,5 @@ runs
 # Generated files
 training/configs/aircraft_classify.yaml
 /training/scripts/logs/
+/training/ckpt/
+/training/output/

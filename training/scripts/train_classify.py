@@ -240,13 +240,13 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         '--project',
         type=str,
-        default='runs/classify',
-        help='Project name for saving results'
+        default=None,
+        help='Project directory for saving results (relative to training/)'
     )
     parser.add_argument(
         '--name',
         type=str,
-        default='aircraft_classifier',
+        default=None,
         help='Experiment name'
     )
     parser.add_argument(
@@ -260,8 +260,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         '--checkpoint-dir',
         type=str,
-        default='checkpoints/stage2',
-        help='Directory to save custom checkpoints'
+        default=None,
+        help='Directory to save custom checkpoints (relative to training/)'
     )
 
     # Config file
@@ -276,8 +276,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         '--log-dir',
         type=str,
-        default='logs',
-        help='Directory to save log files'
+        default=None,
+        help='Directory to save log files (relative to training/)'
     )
     parser.add_argument(
         '--tensorboard',
@@ -366,7 +366,23 @@ class AircraftClassifierTrainer:
         self.config = config
         self.args = args
         self.logger = logger
-        self.checkpoint_dir = Path(args.checkpoint_dir)
+
+        # Get training root directory (parent of scripts/)
+        self.training_root = Path(__file__).parent.parent
+
+        # Generate timestamp for this training session
+        self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+        # Setup checkpoint directory with timestamp
+        checkpoint_base = args.checkpoint_dir or config.get('checkpoint_dir')
+        if checkpoint_base:
+            checkpoint_dir = self._resolve_training_path(checkpoint_base)
+        else:
+            checkpoint_dir = self.training_root / 'ckpt' / 'classify'
+
+        # Add timestamp subdirectory
+        self.checkpoint_dir = checkpoint_dir / self.timestamp
+
         self.best_val_acc = 0.0
 
         # Setup directories
@@ -379,6 +395,29 @@ class AircraftClassifierTrainer:
         self.tb_writer = None
         if args.tensorboard:
             self._setup_tensorboard()
+
+    def _resolve_training_path(self, path: str) -> Path:
+        """
+        Resolve path relative to training/ directory.
+        Config paths use ../xxx notation (relative to training/configs),
+        which resolves to training/xxx.
+
+        Args:
+            path: Path string (can be relative or absolute)
+
+        Returns:
+            Resolved absolute Path object
+        """
+        path_obj = Path(path)
+
+        # If already absolute, return as-is
+        if path_obj.is_absolute():
+            return path_obj
+
+        # Config paths are relative to training/configs
+        # So ../xxx means training/xxx
+        config_dir = self.training_root / 'configs'
+        return (config_dir / path).resolve()
 
     def _init_model(self) -> None:
         """Initialize the YOLO model for training."""
@@ -394,7 +433,13 @@ class AircraftClassifierTrainer:
         try:
             from torch.utils.tensorboard import SummaryWriter
 
-            log_dir = Path(self.args.log_dir) / 'tensorboard' / datetime.now().strftime('%Y%m%d_%H%M%S')
+            # Get log directory from config or use default
+            log_base = self.config.get('log_dir') or (self.training_root / 'logs' / 'classify')
+            if isinstance(log_base, str):
+                log_base = self._resolve_training_path(log_base)
+
+            # Add timestamp subdirectory (use same timestamp as checkpoint)
+            log_dir = log_base / self.timestamp
             self.tb_writer = SummaryWriter(log_dir)
             self.logger.info(f"TensorBoard logging enabled: {log_dir}")
         except ImportError:
@@ -571,7 +616,7 @@ def main() -> None:
 
     # Extract training configuration with defaults
     config = {
-        # Model configuration
+        # Model configuration - resolve model path from config
         'model': args.model or config_obj.get('training.model.name') or 'yolov8n-cls.pt',
 
         # Data configuration (must be a directory for classification)
@@ -609,37 +654,80 @@ def main() -> None:
         # Reproducibility
         'seed': args.seed or config_obj.get('seed.random', 42),
 
-        # Saving
-        'project': args.project or config_obj.get('training.output.project', 'runs/classify'),
-        'name': args.name or config_obj.get('training.output.name', 'aircraft_classifier'),
+        # Saving - resolve all paths relative to training/ directory
+        'project': args.project or config_obj.get('training.output.project') or '../output/classify',
+        'name': args.name or config_obj.get('training.output.name') or 'aircraft_classifier',
         'save_period': args.save_period or config_obj.get('training.save_period', -1),
+
+        # Checkpoint directory
+        'checkpoint_dir': args.checkpoint_dir or config_obj.get('checkpoints.classify') or '../ckpt/classify',
+
+        # Log directory
+        'log_dir': args.log_dir or config_obj.get('logs.classify') or '../logs/classify',
 
         # Validation and plots
         'val': args.val if hasattr(args, 'val') else config_obj.get('training.validation.enabled', True),
         'plots': args.plots if hasattr(args, 'plots') else config_obj.get('training.plots', True),
     }
 
-    # Resolve paths if they are relative
-    # YOLOv8 classification requires a directory path, not a YAML file
-    if not Path(data_path).is_absolute():
-        # Check if it's relative to training/configs
-        config_relative_path = Path(__file__).parent.parent / 'configs' / data_path
-        if config_relative_path.exists() and config_relative_path.is_dir():
-            data_path = str(config_relative_path.resolve())
-        # Check if it's relative to training/
-        elif (Path(__file__).parent.parent / data_path).exists():
-            data_path = str((Path(__file__).parent.parent / data_path).resolve())
-        else:
-            data_path = str(Path(data_path).resolve())
+    # Helper function to resolve config paths
+    # Config paths are relative to /training/configs, so ../xxx means /training/xxx
+    def resolve_config_path(path_str: str) -> str:
+        """Resolve path from config (relative to training/configs) to absolute path."""
+        if Path(path_str).is_absolute():
+            return path_str
 
+        training_root = Path(__file__).parent.parent  # /training
+        config_dir = training_root / 'configs'  # /training/configs
+
+        # Resolve relative to config dir
+        resolved = (config_dir / path_str).resolve()
+        return str(resolved)
+
+    # Resolve data path
+    if not Path(data_path).is_absolute():
+        data_path = resolve_config_path(data_path)
     config['data'] = data_path
 
-    # Setup logging
-    log_dir_path = args.log_dir or config_obj.get('logs.training') or 'logs'
+    # Resolve model path
+    model_path = config['model']
+    if not Path(model_path).is_absolute() and not Path(model_path).exists():
+        # Try to find model in config paths
+        model_name = Path(model_path).stem.replace('-', '_')  # yolov8n-cls -> yolov8n_cls
+        config_model_path = config_obj.get(f'models.pretrained.{model_name}')
+
+        if config_model_path:
+            # Resolve from config
+            resolved_model = resolve_config_path(config_model_path)
+            if Path(resolved_model).exists():
+                config['model'] = resolved_model
+            # else: keep original path, will be downloaded by YOLO
+        else:
+            # Check in model directory from config
+            model_dir = config_obj.get('models.root')
+            if model_dir:
+                resolved_model = resolve_config_path(f"{model_dir.rstrip('/')}/{model_path}")
+                if Path(resolved_model).exists():
+                    config['model'] = resolved_model
+        # If model doesn't exist locally, YOLO will auto-download it
+
+    # Resolve project path
+    project_path = config['project']
+    if not Path(project_path).is_absolute():
+        config['project'] = resolve_config_path(project_path)
+
+    # Generate timestamp for this training session
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+    # Resolve log directory path
+    log_dir_path = config['log_dir']
     if not Path(log_dir_path).is_absolute():
-        log_dir_path = config_obj.get_path('logs.training') or Path(log_dir_path).resolve()
+        log_dir_path = resolve_config_path(log_dir_path)
 
     log_dir = Path(log_dir_path)
+
+    # Add timestamp subdirectory for this training session
+    log_dir = log_dir / timestamp
     logger = setup_logging(log_dir)
 
     # Log startup information
@@ -654,6 +742,11 @@ def main() -> None:
     logger.info(f"Learning rate: {config['lr0']}")
     logger.info(f"Optimizer: {config['optimizer']}")
     logger.info(f"Seed: {config['seed']}")
+    logger.info("=" * 60)
+    logger.info(f"Output paths:")
+    logger.info(f"  Project (YOLO output): {config['project']}")
+    logger.info(f"  Checkpoints: {config['checkpoint_dir']}")
+    logger.info(f"  Logs: {log_dir_path}")
     logger.info("=" * 60)
 
     # Verify dataset paths

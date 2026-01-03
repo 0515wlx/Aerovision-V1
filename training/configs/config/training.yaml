@@ -62,8 +62,8 @@ training:
 
   # 输出配置
   output:
-    # 项目名称（保存结果的根目录）
-    project: "runs/classify"
+    # 项目根目录（YOLO训练结果保存位置）
+    project: "../output/classify"
 
     # 实验名称
     name: "aircraft_classifier"

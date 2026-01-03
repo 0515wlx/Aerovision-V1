@@ -57,8 +57,14 @@ labels:
 # 模型文件路径
 models:
   root: "../model"
-  # 预训练模型
+  # 预训练模型（YOLOv8 分类）
   pretrained:
+    yolov8n_cls: "../model/yolov8n-cls.pt"
+    yolov8s_cls: "../model/yolov8s-cls.pt"
+    yolov8m_cls: "../model/yolov8m-cls.pt"
+    yolov8l_cls: "../model/yolov8l-cls.pt"
+    yolov8x_cls: "../model/yolov8x-cls.pt"
+    # 检测模型
     yolov8n: "../model/yolov8n.pt"
     yolov8s: "../model/yolov8s.pt"
     yolov8m: "../model/yolov8m.pt"
@@ -72,20 +78,29 @@ models:
 
 # 检查点路径
 checkpoints:
-  root: "../checkpoints"
-  # 各阶段检查点
-  stage1: "../checkpoints/stage1"
-  stage2: "../checkpoints/stage2"
-  stage3: "../checkpoints/stage3"
-  stage4: "../checkpoints/stage4"
-  stage5: "../checkpoints/stage5"
-  stage6: "../checkpoints/stage6"
+  root: "../ckpt"
+  # 各任务检查点
+  classify: "../ckpt/classify"
+  detection: "../ckpt/detection"
+  ocr: "../ckpt/ocr"
+
+  # 兼容旧的 stage 命名（已废弃）
+  stage1: "../ckpt/stage1"
+  stage2: "../ckpt/classify"
+  stage3: "../ckpt/stage3"
+  stage4: "../ckpt/stage4"
+  stage5: "../ckpt/stage5"
+  stage6: "../ckpt/detection"
 
 # 日志路径
 logs:
   root: "../logs"
-  # 训练日志
-  training: "../logs/training"
+  # 分类训练日志
+  classify: "../logs/classify"
+  # 检测训练日志
+  detection: "../logs/detection"
+  # OCR训练日志
+  ocr: "../logs/ocr"
   # TensorBoard日志
   tensorboard: "../logs/tensorboard"
   # WandB日志
@@ -94,3 +109,13 @@ logs:
   review: "../logs/review"
   # 输出文件模板
   crop_review: "../logs/crop_review_{timestamp}.png"
+
+# 训练输出路径
+output:
+  root: "../output"
+  # 分类训练输出
+  classify: "../output/classify"
+  # 检测训练输出
+  detection: "../output/detection"
+  # OCR训练输出
+  ocr: "../output/ocr"
