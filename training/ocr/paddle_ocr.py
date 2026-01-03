@@ -29,7 +29,7 @@ class PaddleOCRWrapper:
     
     def __init__(
         self,
-        use_angle_cls: bool = True,
+        use_textline_orientation: bool = True,
         # TODO: 仅需识别英文字母 中划线 和 数字即可
         lang: str = 'ch',
         use_gpu: bool = False,
@@ -42,7 +42,7 @@ class PaddleOCRWrapper:
         初始化 PaddleOCR
         
         Args:
-            use_angle_cls: 是否使用方向分类器
+            use_textline_orientation: 是否使用文本行方向分类器（PaddleOCR 3.3.2+）
             lang: 语言类型 ('ch': 中文, 'en': 英文, 'japan': 日文等)
             use_gpu: 是否使用GPU（通过环境变量控制）
             show_log: 是否显示日志（已弃用，通过环境变量控制）
@@ -50,7 +50,7 @@ class PaddleOCRWrapper:
             rec_model_dir: 识别模型路径
             cls_model_dir: 分类模型路径
         """
-        self.use_angle_cls = use_angle_cls
+        self.use_textline_orientation = use_textline_orientation
         self.lang = lang
         self.use_gpu = use_gpu
         
@@ -67,7 +67,7 @@ class PaddleOCRWrapper:
         
         # 初始化 PaddleOCR（只传递支持的参数）
         ocr_params = {
-            'use_angle_cls': use_angle_cls,
+            'use_textline_orientation': use_textline_orientation,
             'lang': lang,
         }
         
@@ -165,11 +165,20 @@ class PaddleOCRWrapper:
         解析OCR结果，返回纯文本
         
         Args:
-            result: PaddleOCR原始结果
+            result: PaddleOCR原始结果（字典格式，PaddleOCR 3.3.2+）
         
         Returns:
             识别的文字字符串
         """
+        if not result or not result[0]:
+            return ""
+        
+        # PaddleOCR 3.3.2+ 返回字典格式
+        if isinstance(result[0], dict):
+            rec_texts = result[0].get('rec_texts', [])
+            return ' '.join(rec_texts)
+        
+        # 兼容旧版本格式（嵌套列表）
         texts = []
         for line in result[0]:
             if line:
@@ -182,7 +191,7 @@ class PaddleOCRWrapper:
         解析OCR结果，返回详细信息
         
         Args:
-            result: PaddleOCR原始结果
+            result: PaddleOCR原始结果（字典格式，PaddleOCR 3.3.2+）
         
         Returns:
             包含详细信息的字典列表
@@ -193,6 +202,25 @@ class PaddleOCRWrapper:
         if not result or not result[0]:
             return details
         
+        # PaddleOCR 3.3.2+ 返回字典格式
+        if isinstance(result[0], dict):
+            rec_texts = result[0].get('rec_texts', [])
+            rec_scores = result[0].get('rec_scores', [])
+            rec_polys = result[0].get('rec_polys', [])
+            
+            # 遍历识别结果
+            for i, text in enumerate(rec_texts):
+                box = rec_polys[i].tolist() if i < len(rec_polys) else []
+                confidence = float(rec_scores[i]) if i < len(rec_scores) else 0.0
+                
+                details.append({
+                    'text': text,
+                    'confidence': confidence,
+                    'box': box,
+                })
+            return details
+        
+        # 兼容旧版本格式（嵌套列表）
         for line in result[0]:
             if line:
                 box = line[0]  # 文本框坐标 [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
@@ -282,7 +310,7 @@ class PaddleOCRWrapper:
 def create_ocr(
     lang: str = 'ch',
     use_gpu: bool = False,
-    use_angle_cls: bool = True
+    use_textline_orientation: bool = True
 ) -> PaddleOCRWrapper:
     """
     工厂函数：创建PaddleOCR实例
@@ -290,7 +318,7 @@ def create_ocr(
     Args:
         lang: 语言类型
         use_gpu: 是否使用GPU
-        use_angle_cls: 是否使用方向分类器
+        use_textline_orientation: 是否使用文本行方向分类器（PaddleOCR 3.3.2+）
     
     Returns:
         PaddleOCRWrapper实例
@@ -298,14 +326,14 @@ def create_ocr(
     return PaddleOCRWrapper(
         lang=lang,
         use_gpu=use_gpu,
-        use_angle_cls=use_angle_cls
+        use_textline_orientation=use_textline_orientation
     )
 
 
 # 示例用法
 if __name__ == '__main__':
     # 创建OCR实例
-    ocr = create_ocr(lang='ch', use_gpu=False)
+    ocr = create_ocr(lang='ch', use_gpu=False, use_textline_orientation=True)
 
     # TODO: 图片传入方式为 numpy 数组，按照 txt 从对应图片中截取
     
