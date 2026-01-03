@@ -10,7 +10,7 @@ data:
   local_data_root: "../data"
 
   # 统一准备数据集输出根目录
-  prepared_root: "../data/prepared"
+  prepared_root: "../data/prepared/20260102_221524/aerovision/aircraft"
 
   # 原始图片
   raw: "../data/raw"

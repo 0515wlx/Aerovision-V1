@@ -119,7 +119,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         '--data',
         type=str,
-        default='data/processed/aircraft',
+        default='../data/prepared/20260102_221524/aerovision/aircraft',
         help='Path to dataset root directory'
     )
 
@@ -268,8 +268,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         '--config',
         type=str,
-        default='configs/aircraft_classify.yaml',
-        help='Path to configuration YAML file'
+        default=None,
+        help='Path to configuration YAML file (optional, will use modular config if not specified)'
     )
 
     # Logging
@@ -476,9 +476,18 @@ class AircraftClassifierTrainer:
 
             if results:
                 self.logger.info("Final metrics:")
-                for key, value in results.items():
-                    if isinstance(value, (int, float)):
-                        self.logger.info(f"  {key}: {value:.4f}")
+                # Get metrics from ClassifyMetrics object
+                if hasattr(results, 'results_dict'):
+                    metrics_dict = results.results_dict
+                    for key, value in metrics_dict.items():
+                        if isinstance(value, (int, float)):
+                            self.logger.info(f"  {key}: {value:.4f}")
+                elif hasattr(results, 'top1'):
+                    self.logger.info(f"  top1_acc: {results.top1:.4f}")
+                    if hasattr(results, 'top5'):
+                        self.logger.info(f"  top5_acc: {results.top5:.4f}")
+                    if hasattr(results, 'fitness'):
+                        self.logger.info(f"  fitness: {results.fitness:.4f}")
 
             # Save final checkpoint
             if hasattr(self.model, 'trainer') and self.model.trainer:
@@ -546,18 +555,27 @@ def main() -> None:
     args = parse_arguments()
 
     # Load configuration from modular system
-    if args.config:
-        config_obj = load_config(args.config)
-    else:
+    try:
+        if args.config and Path(args.config).exists():
+            config_obj = load_config(args.config)
+        else:
+            config_obj = load_config(modules=['training', 'paths'], load_all_modules=False)
+    except FileNotFoundError as e:
+        # If config file not found, use default modular config
+        print(f"Warning: {e}")
+        print("Using default modular configuration...")
         config_obj = load_config(modules=['training', 'paths'], load_all_modules=False)
+
+    # Get data path - YOLOv8 classification requires a directory, not a YAML file
+    data_path = args.data or config_obj.get('data.prepared_root') or '../data/prepared/20260102_221524/aerovision/aircraft'
 
     # Extract training configuration with defaults
     config = {
         # Model configuration
         'model': args.model or config_obj.get('training.model.name') or 'yolov8n-cls.pt',
 
-        # Data configuration
-        'data': args.data or config_obj.get('data.prepared_root') or 'data/prepared',
+        # Data configuration (must be a directory for classification)
+        'data': data_path,
 
         # Training parameters
         'epochs': args.epochs or config_obj.get('training.epochs', 100),
@@ -602,8 +620,19 @@ def main() -> None:
     }
 
     # Resolve paths if they are relative
-    if config['data'] and not Path(config['data']).is_absolute():
-        config['data'] = str(config_obj.get_path('data.prepared_root') or Path(config['data']).resolve())
+    # YOLOv8 classification requires a directory path, not a YAML file
+    if not Path(data_path).is_absolute():
+        # Check if it's relative to training/configs
+        config_relative_path = Path(__file__).parent.parent / 'configs' / data_path
+        if config_relative_path.exists() and config_relative_path.is_dir():
+            data_path = str(config_relative_path.resolve())
+        # Check if it's relative to training/
+        elif (Path(__file__).parent.parent / data_path).exists():
+            data_path = str((Path(__file__).parent.parent / data_path).resolve())
+        else:
+            data_path = str(Path(data_path).resolve())
+
+    config['data'] = data_path
 
     # Setup logging
     log_dir_path = args.log_dir or config_obj.get('logs.training') or 'logs'
@@ -628,8 +657,21 @@ def main() -> None:
     logger.info("=" * 60)
 
     # Verify dataset paths
-    train_path = Path(config['data']) / 'train'
-    val_path = Path(config['data']) / 'val'
+    # YOLOv8 classification requires a directory structure with train/val/test subdirectories
+    data_dir = Path(config['data'])
+
+    if not data_dir.exists():
+        logger.error(f"Dataset directory not found: {data_dir}")
+        sys.exit(1)
+
+    if not data_dir.is_dir():
+        logger.error(f"Data path must be a directory, not a file: {data_dir}")
+        logger.error("YOLOv8 classification requires directory structure: data_dir/train/, data_dir/val/, etc.")
+        sys.exit(1)
+
+    # Check for train/val directories
+    train_path = data_dir / 'train'
+    val_path = data_dir / 'val'
 
     if not train_path.exists():
         logger.warning(f"Training path not found: {train_path}")
