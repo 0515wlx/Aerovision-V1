@@ -21,7 +21,7 @@ training:
   # 模型配置
   model:
     # YOLOv8 预训练模型名称或路径
-    name: "yolov8n-cls.pt"
+    name: "yolov8m-cls.pt"
 
   # 优化器配置
   optimizer:

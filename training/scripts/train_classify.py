@@ -681,8 +681,24 @@ def main() -> None:
         config_obj = load_config(modules=['training', 'paths'], load_all_modules=False)
 
     # Get data path - YOLOv8 classification requires a directory, not a YAML file
-    # 优先从 config yaml 读取
-    data_path = config_obj.get('data.prepared_root') or args.data or '../data/prepared/20260102_221524/aerovision/aircraft'
+    # 优先从 config yaml 读取（尝试从 latest.txt 读取最新的 split 目录）
+    data_path = None
+
+    # 1. 尝试从 splits/latest.txt 读取
+    splits_root = config_obj.get_path('data.splits.root')
+    if splits_root:
+        latest_txt = Path(splits_root) / 'latest.txt'
+        if latest_txt.exists():
+            with open(latest_txt, 'r', encoding='utf-8') as f:
+                latest_split_dir = f.read().strip()
+            # Aerovision 分类数据集路径
+            aerovision_path = Path(latest_split_dir) / 'aerovision' / 'aircraft'
+            if aerovision_path.exists():
+                data_path = str(aerovision_path)
+
+    # 2. 如果没找到，使用命令行参数或默认值
+    if not data_path:
+        data_path = args.data
 
     # Extract training configuration with defaults
     # 优先级：config yaml > 命令行参数 > 默认值

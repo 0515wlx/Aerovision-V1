@@ -50,6 +50,7 @@ data:
     area: "../data/processed/labeled/registration/registration_area"
     crops: "../data/registration/crops"
 
+
 # 标注文件路径
 labels:
   root: "../data/processed/labeled"
