@@ -9,8 +9,19 @@ data:
   # 本地数据路径
   local_data_root: "../data"
 
-  # 统一准备数据集输出根目录
-  prepared_root: "../data/prepared/20260102_221524/aerovision/aircraft"
+  # 数据准备流程（prepare_dataset.py）
+  prepared:
+    # 输出根目录
+    root: "../data/prepared"
+    # 最新准备的数据集（需要手动更新时间戳，或保持为latest链接）
+    latest: "../data/prepared/latest"
+
+  # 数据集划分流程（split_dataset.py）
+  splits:
+    # 输出根目录
+    root: "../data/splits"
+    # 最新划分的数据集
+    latest: "../data/splits/latest"
 
   # 原始图片
   raw: "../data/raw"
