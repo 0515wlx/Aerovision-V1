@@ -374,7 +374,8 @@ class AircraftClassifierTrainer:
         self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
         # Setup checkpoint directory with timestamp
-        checkpoint_base = args.checkpoint_dir or config.get('checkpoint_dir')
+        # 优先从 config 读取（config 已经合并了 yaml 和 args）
+        checkpoint_base = config.get('checkpoint_dir') or args.checkpoint_dir
         if checkpoint_base:
             checkpoint_dir = self._resolve_training_path(checkpoint_base)
         else:
@@ -393,7 +394,9 @@ class AircraftClassifierTrainer:
 
         # Setup TensorBoard
         self.tb_writer = None
-        if args.tensorboard:
+        # 优先使用 config 中的配置
+        use_tensorboard = config.get('tensorboard', args.tensorboard if hasattr(args, 'tensorboard') else True)
+        if use_tensorboard:
             self._setup_tensorboard()
 
     def _resolve_training_path(self, path: str) -> Path:
@@ -421,9 +424,12 @@ class AircraftClassifierTrainer:
 
     def _init_model(self) -> None:
         """Initialize the YOLO model for training."""
-        if self.args.resume:
-            self.logger.info(f"Resuming training from checkpoint: {self.args.resume}")
-            self.model = YOLO(self.args.resume)
+        # 优先从 config 读取 resume 参数
+        resume_checkpoint = self.config.get('resume') or (self.args.resume if self.args else None)
+
+        if resume_checkpoint:
+            self.logger.info(f"Resuming training from checkpoint: {resume_checkpoint}")
+            self.model = YOLO(resume_checkpoint)
         else:
             model_path = self.config['model']
             model_dir = self.training_root / 'model'
@@ -675,66 +681,72 @@ def main() -> None:
         config_obj = load_config(modules=['training', 'paths'], load_all_modules=False)
 
     # Get data path - YOLOv8 classification requires a directory, not a YAML file
-    data_path = args.data or config_obj.get('data.prepared_root') or '../data/prepared/20260102_221524/aerovision/aircraft'
+    # 优先从 config yaml 读取
+    data_path = config_obj.get('data.prepared_root') or args.data or '../data/prepared/20260102_221524/aerovision/aircraft'
 
     # Extract training configuration with defaults
+    # 优先级：config yaml > 命令行参数 > 默认值
     config = {
         # Model configuration - resolve model path from config
-        'model': args.model or config_obj.get('training.model.name') or 'yolov8n-cls.pt',
+        'model': config_obj.get('training.model.name') or args.model or 'yolov8n-cls.pt',
+        'resume': config_obj.get('training.resume') or args.resume or None,
 
         # Data configuration (must be a directory for classification)
         'data': data_path,
 
         # Training parameters
-        'epochs': args.epochs or config_obj.get('training.epochs', 100),
-        'batch_size': args.batch_size or config_obj.get('training.batch_size', 32),
-        'imgsz': args.imgsz or config_obj.get('training.image_size', 224),
+        'epochs': config_obj.get('training.epochs') or args.epochs or 100,
+        'batch_size': config_obj.get('training.batch_size') or args.batch_size or 32,
+        'imgsz': config_obj.get('training.image_size') or args.imgsz or 224,
 
         # Optimizer
-        'lr0': args.lr0 or config_obj.get('training.optimizer.lr0', 0.001),
-        'optimizer': args.optimizer or config_obj.get('training.optimizer.type', 'AdamW'),
-        'momentum': args.momentum or config_obj.get('training.optimizer.momentum', 0.937),
-        'weight_decay': args.weight_decay or config_obj.get('training.optimizer.weight_decay', 0.0005),
+        'lr0': config_obj.get('training.optimizer.lr0') or args.lr0 or 0.001,
+        'optimizer': config_obj.get('training.optimizer.type') or args.optimizer or 'AdamW',
+        'momentum': config_obj.get('training.optimizer.momentum') or args.momentum or 0.937,
+        'weight_decay': config_obj.get('training.optimizer.weight_decay') or args.weight_decay or 0.0005,
 
         # Learning rate scheduler
-        'cos_lr': args.cos_lr if hasattr(args, 'cos_lr') else config_obj.get('training.scheduler.cosine', True),
-        'lrf': args.lrf or config_obj.get('training.scheduler.lrf', 0.01),
+        'cos_lr': config_obj.get('training.scheduler.cosine') if config_obj.get('training.scheduler.cosine') is not None else (args.cos_lr if hasattr(args, 'cos_lr') else True),
+        'lrf': config_obj.get('training.scheduler.lrf') or args.lrf or 0.01,
 
         # Regularization
-        'dropout': args.dropout or config_obj.get('training.regularization.dropout', 0.0),
+        'dropout': config_obj.get('training.regularization.dropout') if config_obj.get('training.regularization.dropout') is not None else (args.dropout or 0.0),
 
         # Early stopping
-        'patience': args.patience or config_obj.get('training.early_stopping.patience', 50),
+        'patience': config_obj.get('training.early_stopping.patience') or args.patience or 50,
 
         # Warmup
-        'warmup_epochs': args.warmup_epochs or config_obj.get('training.warmup.epochs', 3.0),
+        'warmup_epochs': config_obj.get('training.warmup.epochs') or args.warmup_epochs or 3.0,
 
         # Device
-        'device': args.device or config_obj.get('device.default', '0'),
-        'workers': args.workers or config_obj.get('training.workers', 8),
-        'amp': args.amp if hasattr(args, 'amp') else config_obj.get('training.amp', True),
+        'device': config_obj.get('device.default') or args.device or '0',
+        'workers': config_obj.get('training.workers') or args.workers or 8,
+        'amp': config_obj.get('training.amp') if config_obj.get('training.amp') is not None else (args.amp if hasattr(args, 'amp') else True),
 
         # Reproducibility
-        'seed': args.seed or config_obj.get('seed.random', 42),
+        'seed': config_obj.get('seed.random') or args.seed or 42,
 
         # Saving - resolve all paths relative to training/ directory
         # Note: timestamp will be added to name later
-        'project': args.project or config_obj.get('training.output.project') or '../output/classify',
-        'name': args.name or config_obj.get('training.output.name') or 'aircraft_classifier',
-        'save_period': args.save_period or config_obj.get('training.save_period', -1),
+        'project': config_obj.get('training.output.project') or args.project or '../output/classify',
+        'name': config_obj.get('training.output.name') or args.name or 'aircraft_classifier',
+        'save_period': config_obj.get('training.save_period') if config_obj.get('training.save_period') is not None else (args.save_period or -1),
 
         # Store timestamp for directory naming
         'timestamp': None,  # Will be set later
 
         # Checkpoint directory
-        'checkpoint_dir': args.checkpoint_dir or config_obj.get('checkpoints.classify') or '../ckpt/classify',
+        'checkpoint_dir': config_obj.get('checkpoints.classify') or args.checkpoint_dir or '../ckpt/classify',
 
         # Log directory
-        'log_dir': args.log_dir or config_obj.get('logs.classify') or '../logs/classify',
+        'log_dir': config_obj.get('logs.classify') or args.log_dir or '../logs/classify',
 
         # Validation and plots
-        'val': args.val if hasattr(args, 'val') else config_obj.get('training.validation.enabled', True),
-        'plots': args.plots if hasattr(args, 'plots') else config_obj.get('training.plots', True),
+        'val': config_obj.get('training.validation.enabled') if config_obj.get('training.validation.enabled') is not None else (args.val if hasattr(args, 'val') else True),
+        'plots': config_obj.get('training.plots') if config_obj.get('training.plots') is not None else (args.plots if hasattr(args, 'plots') else True),
+
+        # TensorBoard logging
+        'tensorboard': config_obj.get('training.tensorboard') if config_obj.get('training.tensorboard') is not None else (args.tensorboard if hasattr(args, 'tensorboard') else True),
     }
 
     # Helper function to resolve config paths
@@ -859,7 +871,8 @@ def main() -> None:
         trainer.timestamp = timestamp
 
         # Recreate checkpoint directory with correct timestamp
-        checkpoint_base = args.checkpoint_dir or config.get('checkpoint_dir')
+        # 优先从 config 读取（config 已经合并了 yaml 和 args）
+        checkpoint_base = config.get('checkpoint_dir') or args.checkpoint_dir
         if checkpoint_base:
             checkpoint_dir = trainer._resolve_training_path(checkpoint_base)
         else:
