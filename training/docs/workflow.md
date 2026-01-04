@@ -182,7 +182,7 @@ python training/scripts/verify_data.py
 
 #### 2.1 训练
 ```bash
-python training/scripts/train_detection_model.py \
+python training/scripts/train_detection.py \
     --data data/processed/detection/dataset.yaml \
     --model x \
     --epochs 50 \

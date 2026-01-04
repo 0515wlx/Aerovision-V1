@@ -98,7 +98,7 @@ def train_detector(config: dict) -> bool:
         # 准备命令
         cmd = [
             sys.executable,
-            "training/scripts/train_detection_model.py",
+            "training/scripts/train_detection.py",
             "--data", detector_config['data_yaml'],
             "--model", detector_config['model_size'],
             "--epochs", str(detector_config['epochs']),

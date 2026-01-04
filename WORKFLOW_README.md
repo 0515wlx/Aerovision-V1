@@ -69,10 +69,10 @@ python training/scripts/prepare_detection_dataset.py \
 
 ### 步骤2: 训练检测模型
 
-使用 [`training/scripts/train_detection_model.py`](training/scripts/train_detection_model.py) 脚本训练模型：
+使用 [`training/scripts/train_detection_model.py`](training/scripts/train_detection.py) 脚本训练模型：
 
 ```bash
-python training/scripts/train_detection_model.py \
+python training/scripts/train_detection.py \
     --data data/processed/detection/dataset.yaml \
     --model x \
     --epochs 50 \

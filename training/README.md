@@ -44,7 +44,7 @@ python training/scripts/split_dataset.py
 
 ```bash
 # 训练检测模型
-python training/scripts/train_detection_model.py
+python training/scripts/train_detection.py
 ```
 
 ## 目录结构
