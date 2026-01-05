@@ -4,7 +4,7 @@
 # OCR基础配置
 ocr:
   # 是否启用OCR
-  enabled: false
+  enabled: true
 
   # OCR引擎: paddleocr, easyocr, tesseract
   engine: "paddleocr"

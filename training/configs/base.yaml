@@ -63,6 +63,7 @@ modules:
   crop: "config/crop.yaml"
   review: "config/review.yaml"
   training: "config/training.yaml"
+  airline: "config/airline.yaml"
   augmentation: "config/augmentation.yaml"
   ocr: "config/ocr.yaml"
   logging: "config/logging.yaml"

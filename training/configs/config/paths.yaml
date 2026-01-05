@@ -93,6 +93,7 @@ checkpoints:
   root: "../ckpt"
   # 各任务检查点
   classify: "../ckpt/classify"
+  airline: "../ckpt/airline"
   detection: "../ckpt/detection"
   ocr: "../ckpt/ocr"
 
@@ -109,6 +110,8 @@ logs:
   root: "../logs"
   # 分类训练日志
   classify: "../logs/classify"
+  # 航司识别训练日志
+  airline: "../logs/airline"
   # 检测训练日志
   detection: "../logs/detection"
   # OCR训练日志
@@ -127,6 +130,8 @@ output:
   root: "../output"
   # 分类训练输出
   classify: "../output/classify"
+  # 航司识别训练输出
+  airline: "../output/airline"
   # 检测训练输出
   detection: "../output/detection"
   # OCR训练输出
