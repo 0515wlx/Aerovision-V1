@@ -1,347 +1,326 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PaddleOCR 封装类
-提供统一的OCR识别接口
+注册号 OCR 识别器
+使用 PP-OCRv4_server_rec_doc 模型
+只对 YOLO 边界框裁剪区域进行识别
+
+使用方法:
+    python paddle_ocr.py <image_path> <bbox_txt>
 """
 
 import os
+import sys
+import re
 from typing import List, Dict, Tuple, Optional, Union
 from pathlib import Path
 
+# 设置环境变量（必须最先设置）
+os.environ['DISABLE_MODEL_SOURCE_CHECK'] = 'True'
+os.environ['PADDLEX_LOG_LEVEL'] = 'ERROR'
+
+# Patch importlib.util.find_spec 来阻止 torch 被检测到
+import importlib.util
+_original_find_spec = importlib.util.find_spec
+
+def _patched_find_spec(name, *args, **kwargs):
+    if name == 'torch':
+        return None  # 假装 torch 不存在
+    return _original_find_spec(name, *args, **kwargs)
+
+importlib.util.find_spec = _patched_find_spec
+
+import numpy as np
+from PIL import Image
+import cv2
+
+# Monkey patch for PaddlePaddle 2.6.2 compatibility
 try:
-    from paddleocr import PaddleOCR
-    import numpy as np
-    from PIL import Image
-except ImportError as e:
-    raise ImportError(
-        f"缺少必要的依赖库: {e}\n"
-        "请安装: pip install paddlepaddle paddleocr"
-    )
+    import paddle
+    if hasattr(paddle, 'base') and hasattr(paddle.base, 'libpaddle'):
+        AnalysisConfig = paddle.base.libpaddle.AnalysisConfig
+        if not hasattr(AnalysisConfig, 'set_optimization_level'):
+            AnalysisConfig.set_optimization_level = lambda self, level: None
+            print("[INFO] Applied PaddlePaddle 2.6.2 compatibility patch")
+except Exception as e:
+    print(f"[WARNING] Could not apply compatibility patch: {e}")
+
+# 现在可以安全导入 paddleocr
+from paddleocr import PaddleOCR
 
 
-class PaddleOCRWrapper:
+class RegistrationOCR:
     """
-    PaddleOCR 封装类
-    
-    支持中文和英文识别，返回识别结果和置信度
+    注册号 OCR 识别器
+
+    只对裁剪后的区域进行识别，提高速度和准确率
     """
-    
+
     def __init__(
         self,
-        use_textline_orientation: bool = True,
-        # TODO: 仅需识别英文字母 中划线 和 数字即可
-        lang: str = 'ch',
-        use_gpu: bool = False,
-        show_log: bool = False,
-        det_model_dir: Optional[str] = None,
-        rec_model_dir: Optional[str] = None,
-        cls_model_dir: Optional[str] = None,
+        lang: str = 'en',
+        rec_model_name: str = 'PP-OCRv4_server_rec_doc',
     ):
         """
-        初始化 PaddleOCR
-        
+        初始化 OCR
+
         Args:
-            use_textline_orientation: 是否使用文本行方向分类器（PaddleOCR 3.3.2+）
-            lang: 语言类型 ('ch': 中文, 'en': 英文, 'japan': 日文等)
-            use_gpu: 是否使用GPU（通过环境变量控制）
-            show_log: 是否显示日志（已弃用，通过环境变量控制）
-            det_model_dir: 检测模型路径
-            rec_model_dir: 识别模型路径
-            cls_model_dir: 分类模型路径
+            lang: 语言 ('en' 或 'ch')
+            rec_model_name: 识别模型名称
         """
-        self.use_textline_orientation = use_textline_orientation
-        self.lang = lang
-        self.use_gpu = use_gpu
-        
-        # 通过环境变量控制设备使用
-        # PaddleOCR 新版本使用环境变量控制 GPU/CPU
-        if use_gpu:
-            os.environ['FLAGS_use_gpu'] = 'true'
-        else:
-            os.environ['FLAGS_use_gpu'] = 'false'
-        
-        # 通过环境变量控制日志输出
-        if not show_log:
-            os.environ['FLAGS_ocr_debug_mode'] = '0'
-        
-        # 初始化 PaddleOCR（只传递支持的参数）
-        ocr_params = {
-            'use_textline_orientation': use_textline_orientation,
-            'lang': lang,
-        }
-        
-        # 添加可选的模型路径参数
-        if det_model_dir:
-            ocr_params['det_model_dir'] = det_model_dir
-        if rec_model_dir:
-            ocr_params['rec_model_dir'] = rec_model_dir
-        if cls_model_dir:
-            ocr_params['cls_model_dir'] = cls_model_dir
-        
-        self.ocr = PaddleOCR(**ocr_params)
-        
-        print(f"PaddleOCR 初始化完成 (语言: {lang}, GPU: {use_gpu})")
-    
-    def ocr_text(
-        self,
-        image: Union[str, np.ndarray, Image.Image],
-        return_details: bool = False
-    ) -> Union[str, List[Dict]]:
-        """
-        识别图片中的文字
-        
-        Args:
-            image: 输入图片（文件路径、numpy数组或PIL Image）
-            return_details: 是否返回详细信息
-        
-        Returns:
-            如果 return_details=False: 返回识别的文字字符串
-            如果 return_details=True: 返回详细信息列表
-        """
-        # 加载图片
-        img_array = self._load_image(image)
-        
-        # 执行OCR（新版本不支持 cls 参数）
-        result = self.ocr.ocr(img_array)
-        
-        if not result or result[0] is None:
-            if return_details:
-                return []
-            return ""
-        
-        # 解析结果
-        if return_details:
-            return self._parse_result_details(result)
-        else:
-            return self._parse_result_text(result)
-    
-    def ocr_text_with_boxes(
-        self,
-        image: Union[str, np.ndarray, Image.Image]
-    ) -> List[Dict]:
-        """
-        识别图片中的文字并返回文本框信息
-        
-        Args:
-            image: 输入图片
-        
-        Returns:
-            包含文本框和识别结果的列表
-        """
-        img_array = self._load_image(image)
-        result = self.ocr.ocr(img_array)
-        
-        if not result or result[0] is None:
-            return []
-        
-        return self._parse_result_details(result)
-    
+        # 注册号配置
+        self.whitelist = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-'
+        self.min_confidence = 0.5
+        self.min_chars = 4
+        self.max_chars = 10
+
+        print(f"[INFO] 初始化 PaddleOCR...")
+        print(f"[INFO] 识别模型: {rec_model_name}")
+        print(f"[INFO] 语言: {lang}")
+
+        self.ocr = PaddleOCR(
+            lang=lang,
+            text_recognition_model_name=rec_model_name,
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
+        )
+
+        print(f"[OK] PaddleOCR 初始化完成")
+
     def _load_image(self, image: Union[str, np.ndarray, Image.Image]) -> np.ndarray:
-        """
-        加载图片为numpy数组
-        
-        Args:
-            image: 输入图片
-        
-        Returns:
-            numpy数组格式的图片
-        """
+        """加载图片为 numpy 数组"""
         if isinstance(image, str):
-            # 文件路径
-            img = Image.open(image).convert('RGB')
-            return np.array(img)
+            img = cv2.imread(image)
+            if img is None:
+                raise ValueError(f"无法读取图片: {image}")
+            return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         elif isinstance(image, Image.Image):
-            # PIL Image
             return np.array(image.convert('RGB'))
         elif isinstance(image, np.ndarray):
-            # numpy数组
+            if len(image.shape) == 2:
+                return cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
             return image
         else:
             raise ValueError(f"不支持的图片类型: {type(image)}")
-    
-    def _parse_result_text(self, result: List) -> str:
-        """
-        解析OCR结果，返回纯文本
-        
-        Args:
-            result: PaddleOCR原始结果（字典格式，PaddleOCR 3.3.2+）
-        
-        Returns:
-            识别的文字字符串
-        """
+
+    def _crop_by_yolo_bbox(
+        self,
+        image: np.ndarray,
+        bbox: List[float],
+        padding: float = 0.1
+    ) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
+        """根据 YOLO 格式边界框裁剪图片"""
+        h, w = image.shape[:2]
+        x_center, y_center, box_w, box_h = bbox
+
+        # 转换为像素坐标
+        x1 = int((x_center - box_w / 2) * w)
+        y1 = int((y_center - box_h / 2) * h)
+        x2 = int((x_center + box_w / 2) * w)
+        y2 = int((y_center + box_h / 2) * h)
+
+        # 添加 padding
+        if padding > 0:
+            pad_w = int((x2 - x1) * padding)
+            pad_h = int((y2 - y1) * padding)
+            x1 = max(0, x1 - pad_w)
+            y1 = max(0, y1 - pad_h)
+            x2 = min(w, x2 + pad_w)
+            y2 = min(h, y2 + pad_h)
+
+        cropped = image[y1:y2, x1:x2]
+        return cropped, (x1, y1, x2, y2)
+
+    def _load_bbox_from_txt(self, txt_path: str, class_id: int = 0) -> List[List[float]]:
+        """从 YOLO 格式 txt 文件读取边界框"""
+        path = Path(txt_path)
+        if not path.exists():
+            return []
+
+        bboxes = []
+        with open(path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split()
+                if len(parts) < 5:
+                    continue
+
+                box_class = int(parts[0])
+                if class_id is not None and box_class != class_id:
+                    continue
+
+                bbox = [float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])]
+                bboxes.append(bbox)
+
+        return bboxes
+
+    def _postprocess(self, text: str, confidence: float) -> Tuple[str, bool]:
+        """后处理识别结果"""
+        text = text.upper().replace(' ', '').replace('.', '').replace(',', '')
+        text = ''.join(c for c in text if c in self.whitelist)
+
+        if not (self.min_chars <= len(text) <= self.max_chars):
+            return text, False
+
+        if confidence < self.min_confidence:
+            return text, False
+
+        return text, True
+
+    def _parse_ocr_result(self, result) -> Tuple[str, float]:
+        """解析 OCR 结果"""
         if not result or not result[0]:
-            return ""
-        
-        # PaddleOCR 3.3.2+ 返回字典格式
-        if isinstance(result[0], dict):
-            rec_texts = result[0].get('rec_texts', [])
-            return ' '.join(rec_texts)
-        
-        # 兼容旧版本格式（嵌套列表）
+            return '', 0.0
+
         texts = []
+        confs = []
+
         for line in result[0]:
-            if line:
-                text = line[1][0]
-                texts.append(text)
-        return ' '.join(texts)
-    
-    def _parse_result_details(self, result: List) -> List[Dict]:
-        """
-        解析OCR结果，返回详细信息
-        
-        Args:
-            result: PaddleOCR原始结果（字典格式，PaddleOCR 3.3.2+）
-        
-        Returns:
-            包含详细信息的字典列表
-        """
-        details = []
-        
-        # 检查结果格式
-        if not result or not result[0]:
-            return details
-        
-        # PaddleOCR 3.3.2+ 返回字典格式
-        if isinstance(result[0], dict):
-            rec_texts = result[0].get('rec_texts', [])
-            rec_scores = result[0].get('rec_scores', [])
-            rec_polys = result[0].get('rec_polys', [])
-            
-            # 遍历识别结果
-            for i, text in enumerate(rec_texts):
-                box = rec_polys[i].tolist() if i < len(rec_polys) else []
-                confidence = float(rec_scores[i]) if i < len(rec_scores) else 0.0
-                
-                details.append({
-                    'text': text,
-                    'confidence': confidence,
-                    'box': box,
-                })
-            return details
-        
-        # 兼容旧版本格式（嵌套列表）
-        for line in result[0]:
-            if line:
-                box = line[0]  # 文本框坐标 [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
-                text_info = line[1]  # (text, confidence) 或 text
-                
-                # 处理不同的返回格式
-                if isinstance(text_info, (list, tuple)):
-                    text = text_info[0]
-                    confidence = float(text_info[1]) if len(text_info) > 1 else 0.0
-                else:
-                    text = str(text_info)
-                    confidence = 0.0
-                
-                details.append({
-                    'text': text,
-                    'confidence': confidence,
-                    'box': box,
-                })
-        return details
-    
-    def crop_text_region(
+            if line and len(line) >= 2:
+                text_info = line[1]
+                if isinstance(text_info, (list, tuple)) and len(text_info) >= 2:
+                    texts.append(text_info[0])
+                    confs.append(float(text_info[1]))
+                elif isinstance(text_info, str):
+                    texts.append(text_info)
+                    confs.append(1.0)
+
+        if not texts:
+            return '', 0.0
+
+        return ''.join(texts), sum(confs) / len(confs)
+
+    def recognize(
         self,
         image: Union[str, np.ndarray, Image.Image],
-        box: List[List[int]]
-    ) -> np.ndarray:
-        """
-        根据文本框坐标裁剪文字区域
-        
-        Args:
-            image: 输入图片
-            box: 文本框坐标 [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
-        
-        Returns:
-            裁剪后的图片区域
-        """
-        img_array = self._load_image(image)
-        
-        # 计算最小外接矩形
-        x_coords = [point[0] for point in box]
-        y_coords = [point[1] for point in box]
-        x_min, x_max = int(min(x_coords)), int(max(x_coords))
-        y_min, y_max = int(min(y_coords)), int(max(y_coords))
-        
-        # 裁剪区域
-        cropped = img_array[y_min:y_max, x_min:x_max]
-        return cropped
-    
-    def batch_ocr(
-        self,
-        images: List[Union[str, np.ndarray, Image.Image]],
-        return_details: bool = False
-    ) -> List[Union[str, List[Dict]]]:
-        """
-        批量识别图片中的文字
-        
-        Args:
-            images: 输入图片列表
-            return_details: 是否返回详细信息
-        
-        Returns:
-            识别结果列表
-        """
+        bbox: Optional[List[float]] = None,
+        bbox_txt: Optional[str] = None,
+        class_id: int = 0,
+        padding: float = 0.1,
+    ) -> List[Dict]:
+        """识别注册号"""
+        img = self._load_image(image)
+
+        # 获取边界框
+        if bbox_txt:
+            bboxes = self._load_bbox_from_txt(bbox_txt, class_id)
+        elif bbox:
+            bboxes = [bbox]
+        else:
+            bboxes = [[0.5, 0.5, 1.0, 1.0]]
+
         results = []
-        for image in images:
-            result = self.ocr_text(image, return_details=return_details)
-            results.append(result)
+
+        for box in bboxes:
+            cropped, pixel_bbox = self._crop_by_yolo_bbox(img, box, padding)
+
+            if cropped.size == 0:
+                results.append({
+                    'text': '',
+                    'confidence': 0.0,
+                    'bbox': pixel_bbox,
+                    'valid': False,
+                })
+                continue
+
+            try:
+                ocr_result = self.ocr.ocr(cropped)
+            except Exception as e:
+                print(f"[ERROR] OCR 识别失败: {e}")
+                results.append({
+                    'text': '',
+                    'confidence': 0.0,
+                    'bbox': pixel_bbox,
+                    'valid': False,
+                    'error': str(e),
+                })
+                continue
+
+            text, confidence = self._parse_ocr_result(ocr_result)
+            processed_text, is_valid = self._postprocess(text, confidence)
+
+            results.append({
+                'text': processed_text,
+                'raw_text': text,
+                'confidence': confidence,
+                'bbox': pixel_bbox,
+                'valid': is_valid,
+            })
+
         return results
-    
-    def __call__(
-        self,
-        image: Union[str, np.ndarray, Image.Image],
-        return_details: bool = False
-    ) -> Union[str, List[Dict]]:
-        """
-        使实例可调用
-        
-        Args:
-            image: 输入图片
-            return_details: 是否返回详细信息
-        
-        Returns:
-            识别结果
-        """
-        return self.ocr_text(image, return_details=return_details)
+
+    def recognize_from_bbox(self, image, bbox, padding=0.1) -> Dict:
+        """从单个边界框识别"""
+        results = self.recognize(image, bbox=bbox, padding=padding)
+        return results[0] if results else {'text': '', 'confidence': 0.0, 'valid': False}
+
+    def recognize_from_txt(self, image, bbox_txt, class_id=0, padding=0.1) -> List[Dict]:
+        """从 txt 文件批量识别"""
+        return self.recognize(image, bbox_txt=bbox_txt, class_id=class_id, padding=padding)
+
+
+# 兼容旧 API
+PaddleOCRWrapper = RegistrationOCR
 
 
 def create_ocr(
-    lang: str = 'ch',
-    use_gpu: bool = False,
-    use_textline_orientation: bool = True
-) -> PaddleOCRWrapper:
-    """
-    工厂函数：创建PaddleOCR实例
-    
-    Args:
-        lang: 语言类型
-        use_gpu: 是否使用GPU
-        use_textline_orientation: 是否使用文本行方向分类器（PaddleOCR 3.3.2+）
-    
-    Returns:
-        PaddleOCRWrapper实例
-    """
-    return PaddleOCRWrapper(
-        lang=lang,
-        use_gpu=use_gpu,
-        use_textline_orientation=use_textline_orientation
-    )
+    lang: str = 'en',
+    rec_model_name: str = 'PP-OCRv4_server_rec_doc',
+    **kwargs
+) -> RegistrationOCR:
+    """创建 OCR 实例"""
+    return RegistrationOCR(lang=lang, rec_model_name=rec_model_name)
 
 
-# 示例用法
 if __name__ == '__main__':
-    # 创建OCR实例
-    ocr = create_ocr(lang='ch', use_gpu=False, use_textline_orientation=True)
+    print("=" * 60)
+    print("注册号 OCR 测试")
+    print("=" * 60)
 
-    # TODO: 图片传入方式为 numpy 数组，按照 txt 从对应图片中截取
-    
-    # 识别单张图片
-    # result = ocr.ocr_text('test_image.jpg')
-    # print(f"识别结果: {result}")
-    
-    # 获取详细信息
-    # details = ocr.ocr_text_with_boxes('test_image.jpg')
-    # for item in details:
-    #     print(f"文字: {item['text']}, 置信度: {item['confidence']:.4f}")
+    if len(sys.argv) < 3:
+        print("\n用法: python paddle_ocr.py <image_path> <bbox_txt>")
+        print("示例: python paddle_ocr.py aircraft.jpg aircraft.txt")
+        sys.exit(1)
+
+    image_path = sys.argv[1]
+    bbox_txt = sys.argv[2]
+
+    if not Path(image_path).exists():
+        print(f"[ERROR] 图片不存在: {image_path}")
+        sys.exit(1)
+
+    if not Path(bbox_txt).exists():
+        print(f"[ERROR] txt 文件不存在: {bbox_txt}")
+        sys.exit(1)
+
+    print(f"\n图片: {Path(image_path).name}")
+    print(f"边界框: {Path(bbox_txt).name}")
+
+    # 读取边界框
+    with open(bbox_txt, 'r') as f:
+        lines = f.readlines()
+        print(f"找到 {len(lines)} 个边界框")
+
+    # 创建 OCR 实例
+    print("\n创建 OCR 实例...")
+    ocr = create_ocr(lang='en')
+
+    # 识别
+    print("\n开始识别...")
+    results = ocr.recognize_from_txt(image_path, bbox_txt)
+
+    print(f"\n识别结果 ({len(results)} 个):")
+    for i, r in enumerate(results, 1):
+        print(f"  [{i}] 文本: '{r['text']}'")
+        print(f"      原始: '{r.get('raw_text', '')}'")
+        print(f"      置信度: {r['confidence']:.4f}")
+        print(f"      有效: {r['valid']}")
+        print(f"      位置: {r['bbox']}")
+        print()
+
+    print("=" * 60)
+    print("测试完成")
+    print("=" * 60)
