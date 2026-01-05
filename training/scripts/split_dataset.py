@@ -77,7 +77,8 @@ class DatasetSplitter:
         val_ratio: float = 0.15,
         test_ratio: float = 0.15,
         mode: str = "all",
-        random_seed: int = 42
+        random_seed: int = 42,
+        min_airline_samples: int = 10
     ) -> None:
         """
         初始化数据集划分器
@@ -88,8 +89,9 @@ class DatasetSplitter:
             train_ratio: 训练集比例
             val_ratio: 验证集比例
             test_ratio: 测试集比例
-            mode: 输出模式 ("all", "aerovision", "detection")
+            mode: 输出模式 ("all", "aerovision", "airline", "detection")
             random_seed: 随机种子
+            min_airline_samples: 航司最小样本数（低于此数量的航司将被过滤）
         """
         self.prepare_dir = Path(prepare_dir)
         self.train_ratio = train_ratio
@@ -97,6 +99,7 @@ class DatasetSplitter:
         self.test_ratio = test_ratio
         self.mode = mode
         self.random_seed = random_seed
+        self.min_airline_samples = min_airline_samples
 
         # 验证比例总和
         if not abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6:
@@ -125,14 +128,19 @@ class DatasetSplitter:
         # Aerovision 分类数据集路径
         self.aerovision_root = self.output_dir / "aerovision"
         self.aircraft_dir = self.aerovision_root / "aircraft"
+        self.airline_dir = self.aerovision_root / "airline"
         self.labels_output_dir = self.aerovision_root / "labels"
 
         # Detection 检测数据集路径
         self.detection_root = self.output_dir / "detection"
 
-        # 类别映射
+        # 类别映射（机型）
         self.class_to_id: Dict[str, int] = {}
         self.id_to_class: Dict[int, str] = {}
+
+        # 航司类别映射
+        self.airline_to_id: Dict[str, int] = {}
+        self.id_to_airline: Dict[int, str] = {}
 
         # 设置随机种子
         random.seed(random_seed)
@@ -199,6 +207,55 @@ class DatasetSplitter:
         self.id_to_class = {idx: name for idx, name in enumerate(classes)}
 
         logger.info(f"共发现 {len(self.class_to_id)} 个类别")
+
+    def build_airline_mapping(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        构建航司类别映射，过滤样本数不足的航司
+
+        Args:
+            df: 标注数据
+
+        Returns:
+            过滤后的 DataFrame（只包含有足够样本的航司）
+        """
+        logger.info("构建航司类别映射...")
+
+        # 检查是否有 airline 列
+        if 'airline' not in df.columns:
+            logger.warning("标注数据中没有 'airline' 列，跳过航司数据集准备")
+            return pd.DataFrame()
+
+        # 过滤掉空的航司
+        df_airline = df[df['airline'].notna() & (df['airline'] != '')].copy()
+        df_airline['airline'] = df_airline['airline'].astype(str).str.strip()
+
+        if len(df_airline) == 0:
+            logger.warning("没有有效的航司标注数据")
+            return pd.DataFrame()
+
+        # 统计每个航司的样本数
+        airline_counts = df_airline['airline'].value_counts()
+        logger.info(f"原始航司数量: {len(airline_counts)}")
+
+        # 过滤样本数不足的航司
+        valid_airlines = airline_counts[airline_counts >= self.min_airline_samples].index.tolist()
+        filtered_count = len(airline_counts) - len(valid_airlines)
+
+        if filtered_count > 0:
+            logger.info(f"过滤掉 {filtered_count} 个样本数少于 {self.min_airline_samples} 的航司")
+
+        # 只保留有效航司的记录
+        df_filtered = df_airline[df_airline['airline'].isin(valid_airlines)].copy()
+
+        # 构建航司映射
+        airlines = sorted(df_filtered['airline'].unique())
+        self.airline_to_id = {name: idx for idx, name in enumerate(airlines)}
+        self.id_to_airline = {idx: name for idx, name in enumerate(airlines)}
+
+        logger.info(f"有效航司数量: {len(self.airline_to_id)}")
+        logger.info(f"航司数据集样本数: {len(df_filtered)}")
+
+        return df_filtered
 
     def split_by_class(
         self,
@@ -513,6 +570,160 @@ names:
 
         logger.info(f"检测配置已保存: {yaml_path}")
 
+    def prepare_airline(
+        self,
+        df_airline: pd.DataFrame
+    ) -> None:
+        """
+        准备航司分类数据集
+
+        Args:
+            df_airline: 航司标注数据（已过滤）
+        """
+        logger.info("=" * 60)
+        logger.info("准备航司分类数据集")
+        logger.info("=" * 60)
+
+        if df_airline.empty:
+            logger.warning("没有有效的航司数据，跳过航司数据集准备")
+            return
+
+        # 按航司类别划分
+        train_df, val_df, test_df = self.split_by_class(df_airline, class_column='airline')
+
+        # 创建目录结构
+        self._create_airline_structure()
+
+        # 复制图片到对应目录
+        self._copy_airline_images(train_df, val_df, test_df)
+
+        # 保存航司类别映射
+        self._save_airline_mapping()
+
+        # 保存航司数据集统计
+        self._save_airline_statistics(train_df, val_df, test_df)
+
+        # 创建配置文件
+        self._create_airline_config()
+
+        logger.info(f"航司数据集准备完成: {self.airline_dir}")
+
+    def _create_airline_structure(self) -> None:
+        """创建航司分类目录结构"""
+        self.airline_dir.mkdir(parents=True, exist_ok=True)
+
+        for split in ['train', 'val', 'test']:
+            split_dir = self.airline_dir / split
+            split_dir.mkdir(parents=True, exist_ok=True)
+
+            for airline_name in self.id_to_airline.values():
+                safe_airline_name = airline_name.replace(' ', '_').replace('/', '_').replace('\\', '_')
+                airline_class_dir = split_dir / safe_airline_name
+                airline_class_dir.mkdir(parents=True, exist_ok=True)
+
+    def _copy_airline_images(
+        self,
+        train_df: pd.DataFrame,
+        val_df: pd.DataFrame,
+        test_df: pd.DataFrame
+    ) -> None:
+        """复制图片到航司分类目录结构"""
+        split_data = {
+            'train': train_df,
+            'val': val_df,
+            'test': test_df
+        }
+
+        for split_name, df in split_data.items():
+            logger.info(f"处理航司 {split_name} 数据集...")
+
+            copied = 0
+            skipped = 0
+
+            for _, row in df.iterrows():
+                filename = row['filename']
+                airline = row['airline']
+                safe_airline_name = airline.replace(' ', '_').replace('/', '_').replace('\\', '_')
+
+                src_path = self.images_dir / filename
+                dst_path = self.airline_dir / split_name / safe_airline_name / filename
+
+                if not src_path.exists():
+                    skipped += 1
+                    continue
+
+                if not dst_path.exists():
+                    shutil.copy2(src_path, dst_path)
+                    copied += 1
+
+            logger.info(f"  {split_name}: 复制 {copied}, 跳过 {skipped}")
+
+    def _save_airline_mapping(self) -> None:
+        """保存航司类别映射"""
+        output_file = self.labels_output_dir / "airline_classes.json"
+
+        airline_mapping = {
+            "num_classes": len(self.id_to_airline),
+            "classes": [
+                {"id": airline_id, "name": airline_name}
+                for airline_id, airline_name in self.id_to_airline.items()
+            ]
+        }
+
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(airline_mapping, f, ensure_ascii=False, indent=2)
+
+        logger.info(f"航司类别映射已保存: {output_file}")
+
+    def _save_airline_statistics(
+        self,
+        train_df: pd.DataFrame,
+        val_df: pd.DataFrame,
+        test_df: pd.DataFrame
+    ) -> None:
+        """保存航司数据集统计"""
+        output_file = self.labels_output_dir / "airline_statistics.json"
+
+        splits_info = {}
+        for split_name, df in [('train', train_df), ('val', val_df), ('test', test_df)]:
+            if not df.empty:
+                airline_counts = df['airline'].value_counts().to_dict()
+                splits_info[split_name] = {
+                    "total": len(df),
+                    "airlines": airline_counts
+                }
+
+        statistics = {
+            "num_airlines": len(self.id_to_airline),
+            "min_samples_threshold": self.min_airline_samples,
+            "splits": splits_info,
+            "total_images": len(train_df) + len(val_df) + len(test_df),
+            "timestamp": self.timestamp
+        }
+
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(statistics, f, ensure_ascii=False, indent=2)
+
+        logger.info(f"航司数据集统计已保存: {output_file}")
+
+    def _create_airline_config(self) -> None:
+        """创建航司分类配置文件"""
+        config_file = self.airline_dir / "dataset_config.yaml"
+
+        config = {
+            "path": str(self.airline_dir.absolute()),
+            "train": "train",
+            "val": "val",
+            "test": "test",
+            "names": self.id_to_airline,
+            "nc": len(self.id_to_airline),
+        }
+
+        with open(config_file, 'w', encoding='utf-8') as f:
+            yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+        logger.info(f"航司配置文件已保存: {config_file}")
+
     def print_statistics(
         self,
         train_df: pd.DataFrame,
@@ -559,18 +770,25 @@ names:
         # 4. 保存划分 CSV
         self.save_split_csv(train_df, val_df, test_df)
 
-        # 5. 准备 Aerovision 数据集
+        # 5. 准备 Aerovision 数据集（机型分类）
         if self.mode in ["all", "aerovision"]:
             self.prepare_aerovision(train_df, val_df, test_df)
 
-        # 6. 准备检测数据集
+        # 6. 准备航司分类数据集
+        if self.mode in ["all", "airline"]:
+            # 构建航司映射并过滤数据
+            df_airline = self.build_airline_mapping(df)
+            if not df_airline.empty:
+                self.prepare_airline(df_airline)
+
+        # 7. 准备检测数据集
         if self.mode in ["all", "detection"]:
             self.prepare_detection(train_df, val_df)
 
-        # 7. 打印统计信息
+        # 8. 打印统计信息
         self.print_statistics(train_df, val_df, test_df)
 
-        # 8. 创建 latest 链接
+        # 9. 创建 latest 链接
         self._create_latest_link()
 
         return self.output_dir
@@ -599,11 +817,17 @@ def main() -> None:
   # 指定划分比例
   python split_dataset.py --prepare-dir path/to/prepared --train-ratio 0.8 --val-ratio 0.1 --test-ratio 0.1
 
-  # 只生成分类数据集
+  # 只生成机型分类数据集
   python split_dataset.py --prepare-dir path/to/prepared --mode aerovision
+
+  # 只生成航司分类数据集
+  python split_dataset.py --prepare-dir path/to/prepared --mode airline
 
   # 只生成检测数据集
   python split_dataset.py --prepare-dir path/to/prepared --mode detection
+
+  # 指定航司最小样本数
+  python split_dataset.py --prepare-dir path/to/prepared --min-airline-samples 20
 
 注意:
   本脚本是数据处理流程的第二步
@@ -626,9 +850,9 @@ def main() -> None:
     parser.add_argument(
         '--mode',
         type=str,
-        choices=['all', 'aerovision', 'detection'],
+        choices=['all', 'aerovision', 'airline', 'detection'],
         default='all',
-        help='输出模式: all(全部), aerovision(分类), detection(检测) (默认: all)'
+        help='输出模式: all(全部), aerovision(机型分类), airline(航司分类), detection(检测) (默认: all)'
     )
     parser.add_argument(
         '--train-ratio',
@@ -655,6 +879,12 @@ def main() -> None:
         help='随机种子 (默认: 42)'
     )
     parser.add_argument(
+        '--min-airline-samples',
+        type=int,
+        default=None,
+        help='航司最小样本数，低于此数量的航司将被过滤 (默认: 从配置文件读取或10)'
+    )
+    parser.add_argument(
         '--config',
         type=str,
         default=None,
@@ -667,12 +897,17 @@ def main() -> None:
     if args.config:
         config = load_config(args.config)
     else:
-        config = load_config(modules=['paths'], load_all_modules=False)
+        config = load_config(modules=['paths', 'airline'], load_all_modules=False)
 
     # 获取随机种子
     random_seed = args.seed
     if config.get('seed.random'):
         random_seed = config.get('seed.random')
+
+    # 获取航司最小样本数
+    min_airline_samples = args.min_airline_samples
+    if min_airline_samples is None:
+        min_airline_samples = config.get('airline_data.min_samples_per_class') or 10
 
     # 获取 prepare_dir（优先使用命令行参数）
     prepare_dir = args.prepare_dir
@@ -705,6 +940,7 @@ def main() -> None:
     logger.info(f"  验证集比例: {args.val_ratio}")
     logger.info(f"  测试集比例: {args.test_ratio}")
     logger.info(f"  随机种子: {random_seed}")
+    logger.info(f"  航司最小样本数: {min_airline_samples}")
     logger.info("=" * 60)
 
     # 创建数据集划分器
@@ -715,7 +951,8 @@ def main() -> None:
         val_ratio=args.val_ratio,
         test_ratio=args.test_ratio,
         mode=args.mode,
-        random_seed=random_seed
+        random_seed=random_seed,
+        min_airline_samples=min_airline_samples
     )
 
     # 执行数据集划分
@@ -723,8 +960,9 @@ def main() -> None:
 
     logger.info("")
     logger.info("完成! 数据集已准备好用于训练。")
-    logger.info(f"  Aerovision: {output_dir / 'aerovision'}")
-    logger.info(f"  Detection: {output_dir / 'detection'}")
+    logger.info(f"  机型分类 (Aerovision): {output_dir / 'aerovision' / 'aircraft'}")
+    logger.info(f"  航司分类 (Airline): {output_dir / 'aerovision' / 'airline'}")
+    logger.info(f"  检测 (Detection): {output_dir / 'detection'}")
 
 
 if __name__ == '__main__':

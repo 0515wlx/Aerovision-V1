@@ -114,7 +114,9 @@ class DatasetPreparer:
             'invalid': 0,
             'duplicates_removed': 0,
             'skip_reasons': defaultdict(int),
-            'class_distribution': defaultdict(int)
+            'class_distribution': defaultdict(int),
+            'airline_distribution': defaultdict(int),
+            'has_airline_count': 0
         }
 
         logger.info(f"输出目录: {self.output_dir}")
@@ -288,6 +290,14 @@ class DatasetPreparer:
             # 统计类别分布
             self.stats['class_distribution'][typename] += 1
 
+            # 统计航司分布（如果存在 airline 列）
+            if 'airline' in row.index:
+                airline = row.get('airline')
+                if pd.notna(airline) and airline and str(airline).strip():
+                    airline_name = str(airline).strip()
+                    self.stats['airline_distribution'][airline_name] += 1
+                    self.stats['has_airline_count'] += 1
+
             # 复制注册号标注（如果存在）
             if self.registration_dir:
                 label_filename = Path(filename).stem + '.txt'
@@ -332,7 +342,10 @@ class DatasetPreparer:
                 'duplicates_removed': self.stats['duplicates_removed'],
                 'skip_reasons': dict(self.stats['skip_reasons']),
                 'num_classes': len(self.stats['class_distribution']),
-                'class_distribution': dict(self.stats['class_distribution'])
+                'class_distribution': dict(self.stats['class_distribution']),
+                'num_airlines': len(self.stats['airline_distribution']),
+                'has_airline_count': self.stats['has_airline_count'],
+                'airline_distribution': dict(self.stats['airline_distribution'])
             }
         }
 
@@ -350,7 +363,9 @@ class DatasetPreparer:
         logger.info(f"有效记录: {self.stats['valid']}")
         logger.info(f"无效记录: {self.stats['invalid']}")
         logger.info(f"移除重复: {self.stats['duplicates_removed']}")
-        logger.info(f"类别数量: {len(self.stats['class_distribution'])}")
+        logger.info(f"机型类别数量: {len(self.stats['class_distribution'])}")
+        logger.info(f"航司类别数量: {len(self.stats['airline_distribution'])}")
+        logger.info(f"含航司标注: {self.stats['has_airline_count']}")
 
         if self.stats['skip_reasons']:
             logger.info("\n跳过原因统计:")
