@@ -1,6 +1,6 @@
 # 阶段 6：OCR 注册号识别
 
-> ⏱️ 预计时间：3-4 天
+> ⏱️ 预计时间：2-3 天
 > 🎯 目标：实现飞机注册号的检测和识别
 > 📌 核心概念：检测 + OCR 两阶段流程
 
@@ -9,8 +9,8 @@
 ## 📋 本阶段检查清单
 
 完成本阶段后，你需要有：
-- [ ] 注册号区域检测模型（YOLOv8）
-- [ ] OCR 识别能力（PaddleOCR 或自训练）
+- [ ] 注册号区域检测模型（YOLOv8x）
+- [ ] OCR 识别能力（PaddleOCR）
 - [ ] 完整的检测→识别 Pipeline
 - [ ] 注册号完全正确率 > 75%
 
@@ -34,7 +34,7 @@
     │
     ▼
 ┌─────────────────┐
-│  注册号检测      │  ← YOLOv8 或你标注的 registrationarea
+│  注册号检测      │  ← YOLOv8x 检测模型
 │  (定位)         │
 └────────┬────────┘
          │
@@ -42,7 +42,7 @@
          │
          ▼
 ┌─────────────────┐
-│  OCR 识别       │  ← PaddleOCR / TrOCR / 自训练
+│  OCR 识别       │  ← PaddleOCR
 │  (识别文字)     │
 └────────┬────────┘
          │
@@ -170,7 +170,7 @@ if __name__ == "__main__":
 
 ## 第二步：训练注册号检测模型
 
-### 2.1 使用 YOLOv8 训练
+### 2.1 使用 YOLOv8x 训练
 
 ```python
 # training/scripts/train_registration_detector.py
@@ -180,8 +180,8 @@ from ultralytics import YOLO
 from pathlib import Path
 
 def train_detector():
-    # 加载预训练模型
-    model = YOLO('yolov8m.pt')  # 中等大小
+    # 加载预训练模型（使用 YOLOv8x）
+    model = YOLO('yolov8x.pt')
     
     # 训练
     results = model.train(
@@ -206,7 +206,6 @@ def train_detector():
     
     print("\n训练完成！")
     print(f"最佳模型: training/checkpoints/stage6/registration_detector/weights/best.pt")
-
 
 if __name__ == "__main__":
     train_detector()
@@ -258,7 +257,6 @@ def test_detector(model_path: str, image_dir: str, n_samples: int = 10):
     plt.tight_layout()
     plt.savefig('training/logs/registration_detection_test.png', dpi=150)
     print("结果保存到 training/logs/registration_detection_test.png")
-
 
 if __name__ == "__main__":
     test_detector(
@@ -569,7 +567,6 @@ def evaluate_ocr(pipeline, csv_path: str, image_dir: str):
     
     return accuracy, char_accuracy
 
-
 if __name__ == "__main__":
     from ocr.pipeline import RegistrationPipeline
     
@@ -643,5 +640,4 @@ def postprocess_registration(text):
 
 ## 🔜 下一步
 
-完成所有检查项后，进入 [阶段 7：联合集成](stage7_integration.md)
-
+完成所有检查项后，可以继续优化检测和OCR性能，或集成到推理服务中。

@@ -1,0 +1,84 @@
+# 飞机图片裁剪配置
+# ⚠️ 重要：相对路径相对于 /training/configs 目录
+
+# 裁剪参数
+crop:
+  # 边界框扩展比例（避免裁太紧）
+  # 例如：0.1 表示在原始边界框基础上向外扩展10%
+  padding: 0.1
+
+  # 最小输出尺寸（像素）
+  # 小于此尺寸的裁剪结果会被丢弃
+  min_size: 224
+
+  # 最大输出尺寸（像素）
+  # 如果裁剪结果大于此尺寸，会被缩放
+  max_size: 1024
+
+  # 是否保持宽高比
+  keep_aspect_ratio: true
+
+  # 是否裁剪为正方形
+  square_crop: false
+
+# 输出配置
+output:
+  # JPEG输出质量 (1-100)
+  quality: 100
+
+  # 输出格式
+  format: "jpg"  # jpg, png
+
+  # 是否保存元数据
+  save_metadata: true
+
+  # 元数据保存路径
+  metadata_file: "../data/processed/crop_metadata.json"
+
+# 支持的图片格式
+image_extensions:
+  - "*.jpg"
+  - "*.jpeg"
+  - "*.png"
+  - "*.JPG"
+  - "*.JPEG"
+  - "*.PNG"
+  - "*.bmp"
+  - "*.BMP"
+
+# 批处理配置
+batch:
+  # 是否启用批处理
+  enabled: false
+
+  # 批次大小
+  size: 32
+
+  # 工作线程数
+  num_workers: 4
+
+# 错误处理
+error_handling:
+  # 未检测到飞机时的处理
+  # skip: 跳过该图片
+  # save_original: 保存原图
+  # error: 报错
+  no_detection: "skip"
+
+  # 尺寸太小时的处理
+  too_small: "skip"
+
+  # 是否保存失败列表
+  save_failed_list: true
+  failed_list_path: "../logs/crop_failed.json"
+
+# 可视化配置
+visualization:
+  # 是否可视化裁剪结果
+  enabled: false
+
+  # 可视化样本数量
+  num_samples: 10
+
+  # 保存路径
+  save_path: "../logs/crop_visualization.png"

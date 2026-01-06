@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git checkout:*)",
+      "Bash(../../venv/Scripts/python.exe split_dataset.py)",
+      "Bash(mkdir:*)",
+      "Bash(python -m config.config_loader:*)",
+      "Bash(test:*)",
+      "Bash(python:*)",
+      "Bash(find:*)",
+      "Bash(timeout 30 python:*)",
+      "Bash(timeout 60 python:*)",
+      "Bash(pip show:*)",
+      "Bash(pip install:*)"
+    ]
+  }
+}

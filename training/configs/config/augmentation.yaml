@@ -1,0 +1,266 @@
+# 数据增强配置
+# ⚠️ 重要：相对路径相对于 /training/configs 目录
+
+# 基础增强开关
+augmentation:
+  # 是否启用数据增强
+  enabled: true
+
+  # 训练时增强概率
+  train_prob: 0.8
+
+  # 验证时是否增强
+  val_augment: false
+
+# 几何变换
+geometric:
+  # 水平翻转
+  horizontal_flip:
+    enabled: true
+    prob: 0.5
+
+  # 垂直翻转
+  vertical_flip:
+    enabled: false
+    prob: 0.0
+
+  # 随机旋转
+  rotation:
+    enabled: true
+    prob: 0.5
+    limit: 15  # 度数 [-15, 15]
+
+  # 随机缩放
+  scale:
+    enabled: true
+    prob: 0.5
+    scale_limit: 0.2  # [0.8, 1.2]
+
+  # 随机平移
+  shift:
+    enabled: true
+    prob: 0.5
+    shift_limit: 0.1  # 相对于图片尺寸
+
+  # 透视变换
+  perspective:
+    enabled: false
+    prob: 0.3
+    distortion_scale: 0.2
+
+  # 仿射变换
+  affine:
+    enabled: true
+    prob: 0.5
+    degrees: 15
+    translate: 0.1
+    scale: [0.9, 1.1]
+    shear: 5
+
+# 颜色变换
+color:
+  # 亮度调整
+  brightness:
+    enabled: true
+    prob: 0.5
+    limit: 0.2  # [-0.2, 0.2]
+
+  # 对比度调整
+  contrast:
+    enabled: true
+    prob: 0.5
+    limit: 0.2  # [-0.2, 0.2]
+
+  # 饱和度调整
+  saturation:
+    enabled: true
+    prob: 0.5
+    limit: 0.3
+
+  # 色调调整
+  hue:
+    enabled: true
+    prob: 0.5
+    limit: 0.1
+
+  # RGB平移
+  rgb_shift:
+    enabled: true
+    prob: 0.5
+    r_shift_limit: 20
+    g_shift_limit: 20
+    b_shift_limit: 20
+
+  # 通道混洗
+  channel_shuffle:
+    enabled: false
+    prob: 0.1
+
+  # 灰度化
+  to_gray:
+    enabled: false
+    prob: 0.05
+
+# 质量变换
+quality:
+  # 模糊
+  blur:
+    enabled: true
+    prob: 0.3
+    blur_limit: [3, 7]
+
+  # 高斯模糊
+  gaussian_blur:
+    enabled: true
+    prob: 0.3
+    blur_limit: [3, 7]
+
+  # 运动模糊
+  motion_blur:
+    enabled: true
+    prob: 0.2
+    blur_limit: [3, 7]
+
+  # 高斯噪声
+  gaussian_noise:
+    enabled: true
+    prob: 0.3
+    var_limit: [10.0, 50.0]
+
+  # ISO噪声
+  iso_noise:
+    enabled: true
+    prob: 0.3
+    intensity: [0.1, 0.5]
+
+  # JPEG压缩
+  jpeg_compression:
+    enabled: true
+    prob: 0.3
+    quality_lower: 80
+    quality_upper: 100
+
+# 天气效果
+weather:
+  # 随机阴影
+  random_shadow:
+    enabled: false
+    prob: 0.2
+    shadow_roi: [0, 0.5, 1, 1]
+
+  # 随机雨点
+  random_rain:
+    enabled: false
+    prob: 0.1
+    slant_lower: -10
+    slant_upper: 10
+    drop_length: 20
+
+  # 随机雾
+  random_fog:
+    enabled: false
+    prob: 0.1
+    fog_coef_lower: 0.3
+    fog_coef_upper: 0.8
+
+  # 随机阳光
+  random_sun_flare:
+    enabled: false
+    prob: 0.1
+
+# 裁剪和填充
+cropping:
+  # 随机裁剪
+  random_crop:
+    enabled: true
+    prob: 0.5
+    height: 224
+    width: 224
+
+  # 中心裁剪
+  center_crop:
+    enabled: false
+    height: 224
+    width: 224
+
+  # 随机大小裁剪
+  random_resized_crop:
+    enabled: true
+    prob: 0.5
+    size: [224, 224]
+    scale: [0.8, 1.0]
+    ratio: [0.75, 1.33]
+
+  # 随机擦除
+  random_erasing:
+    enabled: true
+    prob: 0.25
+    scale: [0.02, 0.33]
+    ratio: [0.3, 3.3]
+    value: 0
+
+# Cutout/Coarse Dropout
+cutout:
+  # Cutout
+  enabled: true
+  prob: 0.3
+  num_holes: 1
+  max_h_size: 32
+  max_w_size: 32
+
+  # Coarse Dropout
+  coarse_dropout:
+    enabled: true
+    prob: 0.3
+    max_holes: 8
+    max_height: 32
+    max_width: 32
+
+# 高级增强
+advanced:
+  # Mixup（在训练循环中实现）
+  mixup:
+    enabled: true
+    alpha: 0.2
+
+  # CutMix（在训练循环中实现）
+  cutmix:
+    enabled: true
+    alpha: 1.0
+
+  # AutoAugment
+  autoaugment:
+    enabled: false
+    policy: "imagenet"  # imagenet, cifar10, svhn
+
+  # RandAugment
+  randaugment:
+    enabled: false
+    num_ops: 2
+    magnitude: 9
+
+# 归一化
+normalization:
+  # 使用的统计值: imagenet, custom
+  stats: "imagenet"
+
+  # ImageNet统计值
+  imagenet:
+    mean: [0.485, 0.456, 0.406]
+    std: [0.229, 0.224, 0.225]
+
+  # 自定义统计值（如果需要）
+  custom:
+    mean: [0.5, 0.5, 0.5]
+    std: [0.5, 0.5, 0.5]
+
+# 调整大小
+resize:
+  # 调整大小方法: bilinear, bicubic, lanczos
+  interpolation: "bilinear"
+
+  # 目标尺寸
+  size: 224
+
+  # 是否保持宽高比
+  keep_aspect_ratio: false

@@ -1,0 +1,69 @@
+# AeroVision-V1 全局基础配置
+# ⚠️ 重要：所有相对路径都相对于 /training/configs 目录
+# 无论在哪里运行脚本，../data 都表示 /training/data
+
+# ========== 项目基础信息 ==========
+project:
+  name: "AeroVision-V1"
+  version: "0.1.0"
+  description: "航空摄影智能审核系统"
+
+# ========== 设备配置 ==========
+device:
+  # 训练和推理设备
+  default: "cuda"  # cuda 或 cpu
+  # GPU设置
+  gpu_ids: [0]  # 使用的GPU ID列表
+  # 多GPU训练
+  distributed: false
+
+# ========== 图像预处理 ==========
+image:
+  # 支持的图片格式
+  extensions:
+    - "*.jpg"
+    - "*.jpeg"
+    - "*.png"
+    - "*.JPG"
+    - "*.JPEG"
+    - "*.PNG"
+    - "*.bmp"
+    - "*.BMP"
+
+  # 默认图片尺寸
+  default_size: 224
+
+  # 图片质量
+  jpeg_quality: 100
+
+# ========== 随机种子 ==========
+seed:
+  random: 42
+  numpy: 42
+  torch: 42
+
+# ========== 实验跟踪 ==========
+experiment:
+  # 是否启用wandb
+  use_wandb: false
+  wandb_project: "aerovision-v1"
+  wandb_entity: null  # 你的wandb用户名或团队名
+
+  # 是否启用tensorboard
+  use_tensorboard: true
+
+  # 实验标签
+  tags: []
+
+# ========== 模块配置文件路径 ==========
+# 以下配置会从config子目录加载
+modules:
+  paths: "config/paths.yaml"
+  yolo: "config/yolo.yaml"
+  crop: "config/crop.yaml"
+  review: "config/review.yaml"
+  training: "config/training.yaml"
+  airline: "config/airline.yaml"
+  augmentation: "config/augmentation.yaml"
+  ocr: "config/ocr.yaml"
+  logging: "config/logging.yaml"

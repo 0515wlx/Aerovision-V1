@@ -214,3 +214,15 @@ training/model/
 
 # logs
 training/logs/
+
+# Datasets
+/FGVC_Aircraft_dataset/
+data
+checkpoints
+runs
+
+# Generated files
+training/configs/aircraft_classify.yaml
+/training/scripts/logs/
+/training/ckpt/
+/training/output/
