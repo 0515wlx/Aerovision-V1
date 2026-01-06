@@ -53,7 +53,7 @@ airline_training:
   # 早停
   early_stopping:
     # 耐心值（多少个epoch没有改善就停止）
-    patience: 30
+    patience: 0
 
   # Warmup配置
   warmup:
@@ -96,7 +96,7 @@ airline_data:
   classes_file: "../data/processed/labeled/airline_classes.json"
 
   # 最小样本数（低于此数量的航司类别将被过滤）
-  min_samples_per_class: 10
+  min_samples_per_class: 8
 
   # 是否包含 "Unknown" 类别
   include_unknown: false

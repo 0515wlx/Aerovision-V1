@@ -290,9 +290,15 @@ class DatasetPreparer:
             # 统计类别分布
             self.stats['class_distribution'][typename] += 1
 
-            # 统计航司分布（如果存在 airline 列）
+            # 统计航司分布（支持 'airline' 或 'airlinename' 列名）
+            airline_column = None
             if 'airline' in row.index:
-                airline = row.get('airline')
+                airline_column = 'airline'
+            elif 'airlinename' in row.index:
+                airline_column = 'airlinename'
+
+            if airline_column:
+                airline = row.get(airline_column)
                 if pd.notna(airline) and airline and str(airline).strip():
                     airline_name = str(airline).strip()
                     self.stats['airline_distribution'][airline_name] += 1

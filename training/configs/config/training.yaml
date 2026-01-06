@@ -18,6 +18,9 @@ training:
   # 混合精度训练
   amp: true
 
+  # 最小样本数（低于此数量的机型类别将被过滤）
+  min_samples_per_class: 8
+
   # 模型配置
   model:
     # YOLOv8 预训练模型名称或路径
@@ -53,7 +56,7 @@ training:
   # 早停
   early_stopping:
     # 耐心值（多少个epoch没有改善就停止）
-    patience: 50
+    patience: 0
 
   # Warmup配置
   warmup:

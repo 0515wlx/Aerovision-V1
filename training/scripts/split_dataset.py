@@ -78,6 +78,7 @@ class DatasetSplitter:
         test_ratio: float = 0.15,
         mode: str = "all",
         random_seed: int = 42,
+        min_type_samples: int = 10,
         min_airline_samples: int = 10
     ) -> None:
         """
@@ -91,6 +92,7 @@ class DatasetSplitter:
             test_ratio: 测试集比例
             mode: 输出模式 ("all", "aerovision", "airline", "detection")
             random_seed: 随机种子
+            min_type_samples: 机型最小样本数（低于此数量的机型将被过滤）
             min_airline_samples: 航司最小样本数（低于此数量的航司将被过滤）
         """
         self.prepare_dir = Path(prepare_dir)
@@ -99,6 +101,7 @@ class DatasetSplitter:
         self.test_ratio = test_ratio
         self.mode = mode
         self.random_seed = random_seed
+        self.min_type_samples = min_type_samples
         self.min_airline_samples = min_airline_samples
 
         # 验证比例总和
@@ -192,21 +195,42 @@ class DatasetSplitter:
 
         return df
 
-    def build_class_mapping(self, df: pd.DataFrame, class_column: str = 'typename') -> None:
+    def build_class_mapping(self, df: pd.DataFrame, class_column: str = 'typename') -> pd.DataFrame:
         """
-        构建类别映射
+        构建类别映射，过滤样本数不足的机型
 
         Args:
             df: 标注数据
             class_column: 类别列名
-        """
-        logger.info("构建类别映射...")
 
-        classes = sorted(df[class_column].unique())
+        Returns:
+            过滤后的 DataFrame（只包含有足够样本的机型）
+        """
+        logger.info("构建机型类别映射...")
+
+        # 统计每个机型的样本数
+        type_counts = df[class_column].value_counts()
+        logger.info(f"原始机型数量: {len(type_counts)}")
+
+        # 过滤样本数不足的机型
+        valid_types = type_counts[type_counts >= self.min_type_samples].index.tolist()
+        filtered_count = len(type_counts) - len(valid_types)
+
+        if filtered_count > 0:
+            logger.info(f"过滤掉 {filtered_count} 个样本数少于 {self.min_type_samples} 的机型")
+
+        # 只保留有效机型的记录
+        df_filtered = df[df[class_column].isin(valid_types)].copy()
+
+        # 构建类别映射
+        classes = sorted(df_filtered[class_column].unique())
         self.class_to_id = {name: idx for idx, name in enumerate(classes)}
         self.id_to_class = {idx: name for idx, name in enumerate(classes)}
 
-        logger.info(f"共发现 {len(self.class_to_id)} 个类别")
+        logger.info(f"有效机型数量: {len(self.class_to_id)}")
+        logger.info(f"机型数据集样本数: {len(df_filtered)}")
+
+        return df_filtered
 
     def build_airline_mapping(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -220,14 +244,19 @@ class DatasetSplitter:
         """
         logger.info("构建航司类别映射...")
 
-        # 检查是否有 airline 列
-        if 'airline' not in df.columns:
-            logger.warning("标注数据中没有 'airline' 列，跳过航司数据集准备")
+        # 检查是否有 airline 列（支持 'airline' 或 'airlinename' 列名）
+        airline_column = None
+        if 'airline' in df.columns:
+            airline_column = 'airline'
+        elif 'airlinename' in df.columns:
+            airline_column = 'airlinename'
+        else:
+            logger.warning("标注数据中没有 'airline' 或 'airlinename' 列，跳过航司数据集准备")
             return pd.DataFrame()
 
         # 过滤掉空的航司
-        df_airline = df[df['airline'].notna() & (df['airline'] != '')].copy()
-        df_airline['airline'] = df_airline['airline'].astype(str).str.strip()
+        df_airline = df[df[airline_column].notna() & (df[airline_column] != '')].copy()
+        df_airline['airline'] = df_airline[airline_column].astype(str).str.strip()
 
         if len(df_airline) == 0:
             logger.warning("没有有效的航司标注数据")
@@ -761,11 +790,11 @@ names:
         # 1. 加载标注文件
         df = self.load_labels()
 
-        # 2. 构建类别映射
-        self.build_class_mapping(df)
+        # 2. 构建机型类别映射并过滤数据
+        df_type = self.build_class_mapping(df)
 
-        # 3. 按类别划分数据集
-        train_df, val_df, test_df = self.split_by_class(df)
+        # 3. 按机型类别划分数据集
+        train_df, val_df, test_df = self.split_by_class(df_type)
 
         # 4. 保存划分 CSV
         self.save_split_csv(train_df, val_df, test_df)
@@ -776,12 +805,12 @@ names:
 
         # 6. 准备航司分类数据集
         if self.mode in ["all", "airline"]:
-            # 构建航司映射并过滤数据
+            # 构建航司映射并过滤数据（使用原始 df，不受机型过滤影响）
             df_airline = self.build_airline_mapping(df)
             if not df_airline.empty:
                 self.prepare_airline(df_airline)
 
-        # 7. 准备检测数据集
+        # 7. 准备检测数据集（使用机型过滤后的数据）
         if self.mode in ["all", "detection"]:
             self.prepare_detection(train_df, val_df)
 
@@ -826,8 +855,8 @@ def main() -> None:
   # 只生成检测数据集
   python split_dataset.py --prepare-dir path/to/prepared --mode detection
 
-  # 指定航司最小样本数
-  python split_dataset.py --prepare-dir path/to/prepared --min-airline-samples 20
+  # 指定机型和航司最小样本数
+  python split_dataset.py --prepare-dir path/to/prepared --min-type-samples 5 --min-airline-samples 5
 
 注意:
   本脚本是数据处理流程的第二步
@@ -879,6 +908,12 @@ def main() -> None:
         help='随机种子 (默认: 42)'
     )
     parser.add_argument(
+        '--min-type-samples',
+        type=int,
+        default=None,
+        help='机型最小样本数，低于此数量的机型将被过滤 (默认: 从配置文件读取或10)'
+    )
+    parser.add_argument(
         '--min-airline-samples',
         type=int,
         default=None,
@@ -897,12 +932,17 @@ def main() -> None:
     if args.config:
         config = load_config(args.config)
     else:
-        config = load_config(modules=['paths', 'airline'], load_all_modules=False)
+        config = load_config(modules=['paths', 'airline', 'training'], load_all_modules=False)
 
     # 获取随机种子
     random_seed = args.seed
     if config.get('seed.random'):
         random_seed = config.get('seed.random')
+
+    # 获取机型最小样本数
+    min_type_samples = args.min_type_samples
+    if min_type_samples is None:
+        min_type_samples = config.get('training.min_samples_per_class') or 10
 
     # 获取航司最小样本数
     min_airline_samples = args.min_airline_samples
@@ -940,6 +980,7 @@ def main() -> None:
     logger.info(f"  验证集比例: {args.val_ratio}")
     logger.info(f"  测试集比例: {args.test_ratio}")
     logger.info(f"  随机种子: {random_seed}")
+    logger.info(f"  机型最小样本数: {min_type_samples}")
     logger.info(f"  航司最小样本数: {min_airline_samples}")
     logger.info("=" * 60)
 
@@ -952,6 +993,7 @@ def main() -> None:
         test_ratio=args.test_ratio,
         mode=args.mode,
         random_seed=random_seed,
+        min_type_samples=min_type_samples,
         min_airline_samples=min_airline_samples
     )
 
