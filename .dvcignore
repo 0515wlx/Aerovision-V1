@@ -1,0 +1,15 @@
+# Temporary files
+*.tmp
+*.temp
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Large intermediate files that don't need versioning
+*.pyc
+__pycache__/

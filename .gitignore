@@ -226,3 +226,9 @@ training/configs/aircraft_classify.yaml
 /training/scripts/logs/
 /training/ckpt/
 /training/output/
+.aider*
+/logs
+
+# DVC
+.dvc/cache
+.dvc/tmp
