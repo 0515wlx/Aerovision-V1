@@ -1,0 +1,5 @@
+outs:
+- md5: d19bb634510648a32acd725cc549340e
+  size: 142
+  hash: md5
+  path: airline_classifier.pt

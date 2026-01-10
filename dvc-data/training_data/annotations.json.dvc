@@ -1,0 +1,5 @@
+outs:
+- md5: c9ef38077151d08ed307cb1f9bc192e4
+  size: 219
+  hash: md5
+  path: annotations.json

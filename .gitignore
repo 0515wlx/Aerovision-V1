@@ -207,7 +207,7 @@ marimo/_lsp/
 __marimo__/
 
 # data dict
-training/data/
+# training/data/  # Commented out to allow DVC to manage data files
 
 # models
 training/model/
@@ -226,3 +226,19 @@ training/configs/aircraft_classify.yaml
 /training/scripts/logs/
 /training/ckpt/
 /training/output/
+
+# DVC - Data Version Control
+# Model files and large data files should be managed by DVC
+*.pt
+*.pth
+*.onnx
+*.pkl
+*.bin
+*.safetensors
+
+# But keep .gitkeeper files to maintain directory structure
+!.gitkeeper
+
+# DVC cache and remote directories (local development)
+# /home/wlx/dvc-cache/
+# /home/wlx/dvc-remote/

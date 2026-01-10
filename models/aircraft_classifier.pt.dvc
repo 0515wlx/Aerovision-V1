@@ -1,0 +1,5 @@
+outs:
+- md5: 97c23e7ed896fa6ab2447e782ddc1f5a
+  size: 143
+  hash: md5
+  path: aircraft_classifier.pt

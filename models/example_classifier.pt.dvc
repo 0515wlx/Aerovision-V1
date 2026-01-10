@@ -1,0 +1,5 @@
+outs:
+- md5: 4b1140e69ee98b15246c4301ebf7134c
+  size: 95
+  hash: md5
+  path: example_classifier.pt

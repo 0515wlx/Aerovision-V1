@@ -1,0 +1,12 @@
+{
+  "accuracy": 0.95,
+  "loss": 0.05,
+  "training_time": 2.0,
+  "timestamp": "2026-01-10T11:31:14.828032",
+  "model_config": {
+    "learning_rate": 0.001,
+    "epochs": 100,
+    "batch_size": 32
+  },
+  "data_file": "/home/wlx/Aerovision-V1/dvc-data/training_data/processed_data.pkl"
+}

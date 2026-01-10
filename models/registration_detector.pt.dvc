@@ -1,0 +1,5 @@
+outs:
+- md5: dfceed99fe303876837ed5c01cee0f14
+  size: 148
+  hash: md5
+  path: registration_detector.pt

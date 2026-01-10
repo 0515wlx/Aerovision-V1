@@ -1,0 +1,5 @@
+outs:
+- md5: 66581403d7bbc0de1540ea42b010dc2d
+  size: 140
+  hash: md5
+  path: processed_data.pkl

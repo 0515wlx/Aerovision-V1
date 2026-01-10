@@ -1,0 +1,6 @@
+[cache]
+    dir = /home/wlx/dvc-cache
+[core]
+    remote = local
+['remote "local"']
+    url = /home/wlx/dvc-remote
