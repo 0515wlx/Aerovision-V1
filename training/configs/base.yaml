@@ -11,7 +11,7 @@ project:
 # ========== 设备配置 ==========
 device:
   # 训练和推理设备
-  default: "cuda"  # cuda 或 cpu
+  default: "cpu"  # cuda 或 cpu
   # GPU设置
   gpu_ids: [0]  # 使用的GPU ID列表
   # 多GPU训练
