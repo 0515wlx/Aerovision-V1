@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-FGVC_Aircraft 数据集完整训练工作流脚本
+FGVC_Aircraft 数据集一键准备脚本
 
-本脚本自动化 FGVC_Aircraft 数据集从转换到训练的完整流程
+本脚本自动化 FGVC_Aircraft 数据集的准备流程，包括：
+1. 转换 FGVC 数据集格式
+2. 准备数据集（裁剪、缩放等预处理）
+3. 划分数据集为训练/验证/测试集
+
+训练步骤由 train_classify.py 完成
 """
 
 import argparse
@@ -58,18 +63,18 @@ def run_step(step_name: str, cmd: List[str], timeout: int = 300) -> Tuple[bool, 
 def main() -> None:
     """主函数"""
     parser = argparse.ArgumentParser(
-        description="FGVC_Aircraft 数据集完整训练工作流",
+        description="FGVC_Aircraft 数据集一键准备脚本",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  # 运行完整工作流
+  # 运行完整数据准备流程
   python fgvc_workflow.py --fgvc-dir path/to/FGVC_Aircraft/raw --output-base data/fgvc
 
-  # 只训练机型分类
-  python fgvc_workflow.py --fgvc-dir path/to/FGVC_Aircraft/raw --output-base data/fgvc --task aircraft
+  # 只跳过转换步骤
+  python fgvc_workflow.py --fgvc-dir path/to/FGVC_Aircraft/raw --output-base data/fgvc --skip-convert
 
-  # 只训练航司分类
-  python fgvc_workflow.py --fgvc-dir path/to/FGVC_Aircraft/raw --output-base data/fgvc --task airline
+  # 准备完成后，使用以下命令进行训练:
+  #   python train_classify.py --data data/fgvc/splits/latest/aerovision/aircraft --epochs 100
         """,
     )
 
@@ -77,34 +82,17 @@ def main() -> None:
         "--fgvc-dir", type=str, required=True, help="FGVC_Aircraft数据目录 (raw)"
     )
     parser.add_argument("--output-base", type=str, required=True, help="输出基础目录")
-    parser.add_argument(
-        "--task",
-        type=str,
-        choices=["aircraft", "airline", "all"],
-        default="all",
-        help="训练任务 (默认: all)",
-    )
+    parser.add_argument("--skip-convert", action="store_true", help="跳过FGVC数据转换")
     parser.add_argument("--skip-prepare", action="store_true", help="跳过数据准备阶段")
     parser.add_argument("--skip-split", action="store_true", help="跳过数据划分阶段")
-    parser.add_argument("--epochs", type=int, default=100, help="训练轮数 (默认: 100)")
-    parser.add_argument(
-        "--batch-size", type=int, default=32, help="批次大小 (默认: 32)"
-    )
-    parser.add_argument("--imgsz", type=int, default=224, help="图像大小 (默认: 224)")
-    parser.add_argument("--device", type=str, default="0", help="设备 (默认: 0)")
 
     args = parser.parse_args()
 
     logger.info("=" * 60)
-    logger.info("FGVC_Aircraft 数据集训练工作流")
+    logger.info("FGVC_Aircraft 数据集准备")
     logger.info("=" * 60)
     logger.info(f"FGVC目录: {args.fgvc_dir}")
     logger.info(f"输出基础: {args.output_base}")
-    logger.info(f"训练任务: {args.task}")
-    logger.info(f"训练轮数: {args.epochs}")
-    logger.info(f"批次大小: {args.batch_size}")
-    logger.info(f"图像大小: {args.imgsz}")
-    logger.info(f"设备: {args.device}")
     logger.info("=" * 60)
     logger.info("")
 
@@ -117,7 +105,7 @@ def main() -> None:
     splits_base = Path(args.output_base) / "fgvc_splits"
 
     # 阶段 1: 转换 FGVC 数据集
-    if not args.skip_prepare:
+    if not args.skip_convert:
         logger.info("")
         logger.info("=" * 60)
         logger.info("阶段 1: 转换 FGVC 数据集")
@@ -141,7 +129,7 @@ def main() -> None:
 
             if not success:
                 logger.error(f"转换失败，停止工作流")
-                return 1
+                return
 
         # 合并分割集
         cmd = [
@@ -161,7 +149,7 @@ def main() -> None:
 
         if not success:
             logger.error(f"合并失败，停止工作流")
-            return 1
+            return
 
     # 阶段 2: 准备数据集
     if not args.skip_prepare:
@@ -185,27 +173,25 @@ def main() -> None:
 
         if not success:
             logger.error(f"准备失败，停止工作流")
-            return 1
-
-        # 读取最新的prepared目录
-        latest_txt = prepared_base / "latest.txt"
-        if latest_txt.exists():
-            with open(latest_txt, "r", encoding="utf-8") as f:
-                latest_prepared = Path(f.read().strip())
-        else:
-            logger.error(f"找不到latest.txt: {latest_txt}")
-            return 1
+            return
 
     # 阶段 3: 划分数据集
+    latest_splits = None
+
     if not args.skip_split:
         logger.info("")
         logger.info("=" * 60)
         logger.info("阶段 3: 划分数据集 (split_dataset.py)")
         logger.info("=" * 60)
 
-        prepare_dir = (
-            latest_prepared if not args.skip_prepare else prepared_base / "latest"
-        )
+        # 读取最新的prepared目录
+        latest_txt = prepared_base / "latest.txt"
+        if latest_txt.exists():
+            with open(latest_txt, "r", encoding="utf-8") as f:
+                prepare_dir = Path(f.read().strip())
+        else:
+            logger.error(f"找不到latest.txt: {latest_txt}")
+            return
 
         cmd = [
             sys.executable,
@@ -222,109 +208,41 @@ def main() -> None:
 
         if not success:
             logger.error(f"划分失败，停止工作流")
-            return 1
+            return
 
-        # 读取最新的splits目录
-        # 由于split_dataset.py在splits_base下创建时间戳目录
-        # 我们需要找到最新的目录
-        if not splits_base.exists():
-            logger.error(f"找不到splits目录: {splits_base}")
-            return 1
+    # 读取最新的splits目录（无论是否跳过划分，都需要找到 splits 目录）
+    if not splits_base.exists():
+        logger.error(f"找不到splits目录: {splits_base}")
+        return
 
-        timestamp_dirs = [d for d in splits_base.iterdir() if d.is_dir()]
-        if not timestamp_dirs:
-            logger.error(f"splits目录为空: {splits_base}")
-            return 1
+    timestamp_dirs = [d for d in splits_base.iterdir() if d.is_dir()]
+    if not timestamp_dirs:
+        logger.error(f"splits目录为空: {splits_base}")
+        return
 
-        latest_splits = sorted(
-            timestamp_dirs, key=lambda x: x.stat().st_mtime, reverse=True
-        )[0]
-        logger.info(f"使用splits目录: {latest_splits}")
-    else:
-        # 如果跳过划分，找到最新的splits目录
-        if not splits_base.exists():
-            logger.error(f"找不到splits目录: {splits_base}")
-            return 1
+    latest_splits = sorted(
+        timestamp_dirs, key=lambda x: x.stat().st_mtime, reverse=True
+    )[0]
+    logger.info(f"使用splits目录: {latest_splits}")
 
-        timestamp_dirs = [d for d in splits_base.iterdir() if d.is_dir()]
-        if not timestamp_dirs:
-            logger.error(f"splits目录为空: {splits_base}")
-            return 1
-
-        latest_splits = sorted(
-            timestamp_dirs, key=lambda x: x.stat().st_mtime, reverse=True
-        )[0]
-        logger.info(f"使用splits目录: {latest_splits}")
-
-    # 阶段 4: 训练
+    # 阶段 4: 输出训练命令
     logger.info("")
     logger.info("=" * 60)
-    logger.info("阶段 4: 训练模型")
+    logger.info("数据集准备完成!")
     logger.info("=" * 60)
-
-    tasks = []
-    if args.task in ["aircraft", "all"]:
-        tasks.append("aircraft")
-    if args.task in ["airline", "all"]:
-        tasks.append("airline")
-
-    for task in tasks:
-        logger.info("")
-        logger.info(f"训练任务: {task}")
-
-        if task == "aircraft":
-            data_path = latest_splits / "aerovision" / "aircraft"
-            model_name = "yolov8n-cls.pt"
-            output_name = "fgvc_aircraft_classifier"
-        else:  # airline
-            data_path = latest_splits / "aerovision" / "airline"
-            model_name = "yolov8n-cls.pt"
-            output_name = "fgvc_airline_classifier"
-
-        cmd = [
-            sys.executable,
-            str(scripts_dir / "train_classify.py"),
-            "--data",
-            str(data_path),
-            "--model",
-            model_name,
-            "--epochs",
-            str(args.epochs),
-            "--batch-size",
-            str(args.batch_size),
-            "--imgsz",
-            str(args.imgsz),
-            "--device",
-            args.device,
-            "--project",
-            "output/classify",
-            "--name",
-            output_name,
-        ]
-
-        logger.info(f"数据路径: {data_path}")
-        logger.info(f"模型: {model_name}")
-
-        # 训练步骤不设置超时，让用户手动控制
-        logger.info("开始训练... (按Ctrl+C停止)")
-
-        try:
-            result = subprocess.run(cmd, check=True)
-            logger.info(f"✓ {task} 训练完成")
-        except KeyboardInterrupt:
-            logger.warning(f"✗ {task} 训练被中断")
-            return 1
-        except subprocess.CalledProcessError as e:
-            logger.error(f"✗ {task} 训练失败")
-            logger.error(f"错误: {e.stderr}")
-            return 1
-
     logger.info("")
-    logger.info("=" * 60)
-    logger.info("工作流完成!")
-    logger.info("=" * 60)
-
-    return 0
+    logger.info("现在可以使用 train_classify.py 进行训练")
+    logger.info("")
+    logger.info("训练机型分类:")
+    logger.info(
+        f"  python train_classify.py --data {latest_splits}/aerovision/aircraft --epochs 100"
+    )
+    logger.info("")
+    logger.info("训练航司分类:")
+    logger.info(
+        f"  python train_classify.py --data {latest_splits}/aerovision/airline --epochs 100"
+    )
+    logger.info("")
 
 
 if __name__ == "__main__":
