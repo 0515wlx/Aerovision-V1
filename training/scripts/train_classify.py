@@ -41,6 +41,13 @@ import torch
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from configs import load_config
+from training_utils import (
+    FocalLoss,
+    ConfidencePenalty,
+    Mixup,
+    CombinedLoss,
+    apply_gradient_accumulation,
+)
 
 from ultralytics import YOLO
 from ultralytics.utils import LOGGER, colorstr
@@ -67,11 +74,11 @@ def setup_logging(log_dir: Path) -> logging.Logger:
 
     # File handler - detailed logs
     log_file = log_dir / f"train_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
     file_handler.setLevel(logging.DEBUG)
     file_formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
     file_handler.setFormatter(file_formatter)
     logger.addHandler(file_handler)
@@ -80,8 +87,7 @@ def setup_logging(log_dir: Path) -> logging.Logger:
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.INFO)
     console_formatter = logging.Formatter(
-        '%(asctime)s - %(levelname)s - %(message)s',
-        datefmt='%H:%M:%S'
+        "%(asctime)s - %(levelname)s - %(message)s", datefmt="%H:%M:%S"
     )
     console_handler.setFormatter(console_formatter)
     logger.addHandler(console_handler)
@@ -97,209 +103,207 @@ def parse_arguments() -> argparse.Namespace:
         Parsed arguments namespace.
     """
     parser = argparse.ArgumentParser(
-        description='Fine-tune YOLOv8 model for aircraft type classification',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        description="Fine-tune YOLOv8 model for aircraft type classification",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
     # Model arguments
     parser.add_argument(
-        '--model',
+        "--model",
         type=str,
-        default='yolov8n-cls.pt',
-        help='Pre-trained model path or model name'
+        default="yolov8n-cls.pt",
+        help="Pre-trained model path or model name",
     )
     parser.add_argument(
-        '--resume',
+        "--resume",
         type=str,
         default=None,
-        help='Path to checkpoint to resume training from'
+        help="Path to checkpoint to resume training from",
     )
 
     # Data arguments
     parser.add_argument(
-        '--data',
+        "--data",
         type=str,
-        default='../data/prepared/20260102_221524/aerovision/aircraft',
-        help='Path to dataset root directory'
+        default="../data/prepared/20260102_221524/aerovision/aircraft",
+        help="Path to dataset root directory",
     )
 
     # Training arguments
     parser.add_argument(
-        '--epochs',
-        type=int,
-        default=100,
-        help='Number of training epochs'
+        "--epochs", type=int, default=100, help="Number of training epochs"
     )
     parser.add_argument(
-        '--batch-size',
-        type=int,
-        default=32,
-        help='Batch size for training'
+        "--batch-size", type=int, default=32, help="Batch size for training"
     )
-    parser.add_argument(
-        '--imgsz',
-        type=int,
-        default=224,
-        help='Input image size'
-    )
+    parser.add_argument("--imgsz", type=int, default=224, help="Input image size")
 
     # Optimizer arguments
     parser.add_argument(
-        '--lr0',
-        type=float,
-        default=0.001,
-        help='Initial learning rate'
+        "--lr0", type=float, default=0.001, help="Initial learning rate"
     )
     parser.add_argument(
-        '--optimizer',
+        "--optimizer",
         type=str,
-        default='AdamW',
-        choices=['SGD', 'Adam', 'AdamW', 'NAdam', 'RAdam', 'RMSProp', 'auto'],
-        help='Optimizer type'
+        default="AdamW",
+        choices=["SGD", "Adam", "AdamW", "NAdam", "RAdam", "RMSProp", "auto"],
+        help="Optimizer type",
     )
     parser.add_argument(
-        '--momentum',
-        type=float,
-        default=0.937,
-        help='SGD momentum or Adam beta1'
+        "--momentum", type=float, default=0.937, help="SGD momentum or Adam beta1"
     )
     parser.add_argument(
-        '--weight-decay',
+        "--weight-decay",
         type=float,
         default=0.0005,
-        help='Weight decay (L2 regularization)'
+        help="Weight decay (L2 regularization)",
     )
 
     # Learning rate scheduler
     parser.add_argument(
-        '--cos-lr',
-        action='store_true',
+        "--cos-lr",
+        action="store_true",
         default=True,
-        help='Use cosine learning rate scheduler'
+        help="Use cosine learning rate scheduler",
     )
     parser.add_argument(
-        '--lrf',
-        type=float,
-        default=0.01,
-        help='Final learning rate fraction'
+        "--lrf", type=float, default=0.01, help="Final learning rate fraction"
     )
 
     # Regularization
     parser.add_argument(
-        '--dropout',
-        type=float,
-        default=0.0,
-        help='Dropout for classification head'
+        "--dropout", type=float, default=0.0, help="Dropout for classification head"
     )
 
     # Early stopping
     parser.add_argument(
-        '--patience',
+        "--patience",
         type=int,
         default=50,
-        help='Early stopping patience (epochs without improvement)'
+        help="Early stopping patience (epochs without improvement)",
     )
 
     # Warmup
     parser.add_argument(
-        '--warmup-epochs',
-        type=float,
-        default=3.0,
-        help='Warmup epochs'
+        "--warmup-epochs", type=float, default=3.0, help="Warmup epochs"
     )
 
     # Device and performance
     parser.add_argument(
-        '--device',
-        type=str,
-        default='0',
-        help='Device to use (e.g., 0, 1, cpu, mps)'
+        "--device", type=str, default="0", help="Device to use (e.g., 0, 1, cpu, mps)"
     )
     parser.add_argument(
-        '--workers',
-        type=int,
-        default=8,
-        help='Number of dataloader workers'
+        "--workers", type=int, default=8, help="Number of dataloader workers"
     )
     parser.add_argument(
-        '--amp',
-        action='store_true',
+        "--amp",
+        action="store_true",
         default=True,
-        help='Use Automatic Mixed Precision training'
+        help="Use Automatic Mixed Precision training",
     )
 
     # Reproducibility
     parser.add_argument(
-        '--seed',
-        type=int,
-        default=42,
-        help='Random seed for reproducibility'
+        "--seed", type=int, default=42, help="Random seed for reproducibility"
     )
 
     # Saving
     parser.add_argument(
-        '--project',
+        "--project",
         type=str,
         default=None,
-        help='Project directory for saving results (relative to training/)'
+        help="Project directory for saving results (relative to training/)",
     )
+    parser.add_argument("--name", type=str, default=None, help="Experiment name")
     parser.add_argument(
-        '--name',
-        type=str,
-        default=None,
-        help='Experiment name'
-    )
-    parser.add_argument(
-        '--save-period',
+        "--save-period",
         type=int,
         default=-1,
-        help='Save checkpoint every N epochs (-1 to disable)'
+        help="Save checkpoint every N epochs (-1 to disable)",
     )
 
     # Checkpoint directory (custom)
     parser.add_argument(
-        '--checkpoint-dir',
+        "--checkpoint-dir",
         type=str,
         default=None,
-        help='Directory to save custom checkpoints (relative to training/)'
+        help="Directory to save custom checkpoints (relative to training/)",
     )
 
     # Config file
     parser.add_argument(
-        '--config',
+        "--config",
         type=str,
         default=None,
-        help='Path to configuration YAML file (optional, will use modular config if not specified)'
+        help="Path to configuration YAML file (optional, will use modular config if not specified)",
     )
 
     # Logging
     parser.add_argument(
-        '--log-dir',
+        "--log-dir",
         type=str,
         default=None,
-        help='Directory to save log files (relative to training/)'
+        help="Directory to save log files (relative to training/)",
     )
     parser.add_argument(
-        '--tensorboard',
-        action='store_true',
+        "--tensorboard",
+        action="store_true",
         default=True,
-        help='Enable TensorBoard logging'
+        help="Enable TensorBoard logging",
     )
 
     # Validation
     parser.add_argument(
-        '--val',
-        action='store_true',
+        "--val",
+        action="store_true",
         default=True,
-        help='Run validation during training'
+        help="Run validation during training",
     )
 
     # Plots
     parser.add_argument(
-        '--plots',
-        action='store_true',
+        "--plots",
+        action="store_true",
         default=True,
-        help='Save plots and images during training'
+        help="Save plots and images during training",
+    )
+
+    # Advanced features
+    parser.add_argument(
+        "--accumulate",
+        type=int,
+        default=1,
+        help="Gradient accumulation steps (default: 1, no accumulation)",
+    )
+    parser.add_argument(
+        "--confidence-penalty",
+        type=float,
+        default=0.0,
+        help="Confidence penalty weight (default: 0.0, disabled)",
+    )
+    parser.add_argument(
+        "--focal-loss",
+        action="store_true",
+        default=False,
+        help="Use Focal Loss instead of Cross Entropy",
+    )
+    parser.add_argument(
+        "--focal-alpha", type=float, default=0.25, help="Focal Loss alpha parameter"
+    )
+    parser.add_argument(
+        "--focal-gamma", type=float, default=2.0, help="Focal Loss gamma parameter"
+    )
+    parser.add_argument(
+        "--mixup",
+        action="store_true",
+        default=False,
+        help="Use Mixup data augmentation",
+    )
+    parser.add_argument(
+        "--mixup-alpha",
+        type=float,
+        default=0.4,
+        help="Mixup alpha parameter for Beta distribution",
     )
 
     return parser.parse_args()
@@ -311,7 +315,7 @@ def save_custom_checkpoint(
     optimizer: torch.optim.Optimizer,
     val_acc: float,
     checkpoint_path: Path,
-    is_best: bool = False
+    is_best: bool = False,
 ) -> None:
     """
     Save custom checkpoint with specific format.
@@ -331,13 +335,13 @@ def save_custom_checkpoint(
 
     # Prepare checkpoint
     checkpoint = {
-        'epoch': epoch,
-        'model_state_dict': pt_model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'val_acc': val_acc,
-        'model_args': pt_model.args if hasattr(pt_model, 'args') else {},
-        'names': pt_model.names if hasattr(pt_model, 'names') else {},
-        'date': datetime.now().isoformat(),
+        "epoch": epoch,
+        "model_state_dict": pt_model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "val_acc": val_acc,
+        "model_args": pt_model.args if hasattr(pt_model, "args") else {},
+        "names": pt_model.names if hasattr(pt_model, "names") else {},
+        "date": datetime.now().isoformat(),
     }
 
     # Save checkpoint
@@ -345,7 +349,7 @@ def save_custom_checkpoint(
 
     # Save best checkpoint separately
     if is_best:
-        best_path = checkpoint_path.parent / 'best.pt'
+        best_path = checkpoint_path.parent / "best.pt"
         torch.save(checkpoint, best_path)
 
 
@@ -354,7 +358,9 @@ class AircraftClassifierTrainer:
     Wrapper class for training aircraft classifier with custom logging and checkpointing.
     """
 
-    def __init__(self, config: Dict[str, Any], args: argparse.Namespace, logger: logging.Logger):
+    def __init__(
+        self, config: Dict[str, Any], args: argparse.Namespace, logger: logging.Logger
+    ):
         """
         Initialize the aircraft classifier trainer.
 
@@ -371,15 +377,15 @@ class AircraftClassifierTrainer:
         self.training_root = Path(__file__).parent.parent
 
         # Generate timestamp for this training session
-        self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         # Setup checkpoint directory with timestamp
         # 优先从 config 读取（config 已经合并了 yaml 和 args）
-        checkpoint_base = config.get('checkpoint_dir') or args.checkpoint_dir
+        checkpoint_base = config.get("checkpoint_dir") or args.checkpoint_dir
         if checkpoint_base:
             checkpoint_dir = self._resolve_training_path(checkpoint_base)
         else:
-            checkpoint_dir = self.training_root / 'ckpt' / 'classify'
+            checkpoint_dir = self.training_root / "ckpt" / "classify"
 
         # Add timestamp subdirectory
         self.checkpoint_dir = checkpoint_dir / self.timestamp
@@ -389,13 +395,18 @@ class AircraftClassifierTrainer:
         # Setup directories
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
+        # Initialize advanced features
+        self._init_advanced_features()
+
         # Initialize model
         self._init_model()
 
         # Setup TensorBoard
         self.tb_writer = None
         # 优先使用 config 中的配置
-        use_tensorboard = config.get('tensorboard', args.tensorboard if hasattr(args, 'tensorboard') else True)
+        use_tensorboard = config.get(
+            "tensorboard", args.tensorboard if hasattr(args, "tensorboard") else True
+        )
         if use_tensorboard:
             self._setup_tensorboard()
 
@@ -419,20 +430,57 @@ class AircraftClassifierTrainer:
 
         # Config paths are relative to training/configs
         # So ../xxx means training/xxx
-        config_dir = self.training_root / 'configs'
+        config_dir = self.training_root / "configs"
         return (config_dir / path).resolve()
+
+    def _init_advanced_features(self) -> None:
+        """Initialize advanced training features."""
+        # Gradient accumulation
+        self.accumulate = self.config.get("accumulate", 1)
+        if self.accumulate > 1:
+            self.logger.info(f"Gradient accumulation enabled: {self.accumulate} steps")
+
+        # Confidence Penalty
+        self.confidence_penalty_weight = self.config.get("confidence_penalty", 0.0)
+        if self.confidence_penalty_weight > 0:
+            self.logger.info(
+                f"Confidence Penalty enabled: weight={self.confidence_penalty_weight}"
+            )
+
+        # Focal Loss
+        self.use_focal_loss = self.config.get("focal_loss", False)
+        self.focal_alpha = self.config.get("focal_alpha", 0.25)
+        self.focal_gamma = self.config.get("focal_gamma", 2.0)
+        if self.use_focal_loss:
+            self.logger.info(
+                f"Focal Loss enabled: alpha={self.focal_alpha}, gamma={self.focal_gamma}"
+            )
+
+        # Mixup
+        self.use_mixup = self.config.get("mixup", False)
+        self.mixup_alpha = self.config.get("mixup_alpha", 0.4)
+        if self.use_mixup:
+            self.mixup = Mixup(alpha=self.mixup_alpha)
+            self.logger.info(f"Mixup enabled: alpha={self.mixup_alpha}")
+        else:
+            self.mixup = None
+
+        # Initialize loss function (will be configured after model is loaded)
+        self.loss_fn = None
 
     def _init_model(self) -> None:
         """Initialize the YOLO model for training."""
         # 优先从 config 读取 resume 参数
-        resume_checkpoint = self.config.get('resume') or (self.args.resume if self.args else None)
+        resume_checkpoint = self.config.get("resume") or (
+            self.args.resume if self.args else None
+        )
 
         if resume_checkpoint:
             self.logger.info(f"Resuming training from checkpoint: {resume_checkpoint}")
             self.model = YOLO(resume_checkpoint)
         else:
-            model_path = self.config['model']
-            model_dir = self.training_root / 'model'
+            model_path = self.config["model"]
+            model_dir = self.training_root / "model"
             model_dir.mkdir(parents=True, exist_ok=True)
 
             # Check if model path is absolute and exists
@@ -453,9 +501,12 @@ class AircraftClassifierTrainer:
                 else:
                     # Model doesn't exist, download it
                     # Use absolute path to ensure it downloads to model directory
-                    self.logger.info(f"Model not found locally, will download to: {model_dir}")
+                    self.logger.info(
+                        f"Model not found locally, will download to: {model_dir}"
+                    )
                     # Download to model directory by using the absolute path
                     import os
+
                     original_dir = os.getcwd()
                     try:
                         # Change to model directory temporarily
@@ -463,13 +514,15 @@ class AircraftClassifierTrainer:
                         self.model = YOLO(model_filename)
                         # Change back
                         os.chdir(original_dir)
-                        self.logger.info(f"Model downloaded to: {model_dir / model_filename}")
+                        self.logger.info(
+                            f"Model downloaded to: {model_dir / model_filename}"
+                        )
                     except Exception as e:
                         os.chdir(original_dir)
                         raise e
 
                 # Update config with actual model path
-                self.config['model'] = str(local_model_path)
+                self.config["model"] = str(local_model_path)
 
     def _setup_tensorboard(self) -> None:
         """Setup TensorBoard writer for logging."""
@@ -477,7 +530,9 @@ class AircraftClassifierTrainer:
             from torch.utils.tensorboard import SummaryWriter
 
             # Get log directory from config or use default
-            log_base = self.config.get('log_dir') or (self.training_root / 'logs' / 'classify')
+            log_base = self.config.get("log_dir") or (
+                self.training_root / "logs" / "classify"
+            )
             if isinstance(log_base, str):
                 log_base = self._resolve_training_path(log_base)
 
@@ -486,7 +541,9 @@ class AircraftClassifierTrainer:
             self.tb_writer = SummaryWriter(log_dir)
             self.logger.info(f"TensorBoard logging enabled: {log_dir}")
         except ImportError:
-            self.logger.warning("TensorBoard not available. Install with: pip install tensorboard")
+            self.logger.warning(
+                "TensorBoard not available. Install with: pip install tensorboard"
+            )
             self.tb_writer = None
 
     def log_metrics(self, metrics: Dict[str, float], epoch: int) -> None:
@@ -504,7 +561,7 @@ class AircraftClassifierTrainer:
         # Log to TensorBoard
         if self.tb_writer:
             for key, value in metrics.items():
-                self.tb_writer.add_scalar(f'train/{key}', value, epoch)
+                self.tb_writer.add_scalar(f"train/{key}", value, epoch)
             self.tb_writer.flush()
 
     def train(self) -> None:
@@ -525,34 +582,35 @@ class AircraftClassifierTrainer:
 
         # Ensure all YOLO downloads go to model directory
         import os
+
         original_dir = os.getcwd()
-        model_dir = self.training_root / 'model'
+        model_dir = self.training_root / "model"
 
         # Prepare training arguments for YOLO
         train_args = {
-            'data': self.config['data'],
-            'epochs': self.config['epochs'],
-            'batch': self.config['batch_size'],
-            'imgsz': self.config['imgsz'],
-            'lr0': self.config['lr0'],
-            'optimizer': self.config['optimizer'],
-            'momentum': self.config['momentum'],
-            'weight_decay': self.config['weight_decay'],
-            'cos_lr': self.config['cos_lr'],
-            'lrf': self.config['lrf'],
-            'dropout': self.config['dropout'],
-            'patience': self.config['patience'],
-            'warmup_epochs': self.config['warmup_epochs'],
-            'device': self.config['device'],
-            'workers': self.config['workers'],
-            'amp': self.config['amp'],
-            'seed': self.config['seed'],
-            'project': self.config['project'],
-            'name': self.config['name'],
-            'save_period': self.config['save_period'],
-            'val': self.config['val'],
-            'plots': self.config['plots'],
-            'verbose': True,
+            "data": self.config["data"],
+            "epochs": self.config["epochs"],
+            "batch": self.config["batch_size"],
+            "imgsz": self.config["imgsz"],
+            "lr0": self.config["lr0"],
+            "optimizer": self.config["optimizer"],
+            "momentum": self.config["momentum"],
+            "weight_decay": self.config["weight_decay"],
+            "cos_lr": self.config["cos_lr"],
+            "lrf": self.config["lrf"],
+            "dropout": self.config["dropout"],
+            "patience": self.config["patience"],
+            "warmup_epochs": self.config["warmup_epochs"],
+            "device": self.config["device"],
+            "workers": self.config["workers"],
+            "amp": self.config["amp"],
+            "seed": self.config["seed"],
+            "project": self.config["project"],
+            "name": self.config["name"],
+            "save_period": self.config["save_period"],
+            "val": self.config["val"],
+            "plots": self.config["plots"],
+            "verbose": True,
         }
 
         # Start training
@@ -577,20 +635,20 @@ class AircraftClassifierTrainer:
             if results:
                 self.logger.info("Final metrics:")
                 # Get metrics from ClassifyMetrics object
-                if hasattr(results, 'results_dict'):
+                if hasattr(results, "results_dict"):
                     metrics_dict = results.results_dict
                     for key, value in metrics_dict.items():
                         if isinstance(value, (int, float)):
                             self.logger.info(f"  {key}: {value:.4f}")
-                elif hasattr(results, 'top1'):
+                elif hasattr(results, "top1"):
                     self.logger.info(f"  top1_acc: {results.top1:.4f}")
-                    if hasattr(results, 'top5'):
+                    if hasattr(results, "top5"):
                         self.logger.info(f"  top5_acc: {results.top5:.4f}")
-                    if hasattr(results, 'fitness'):
+                    if hasattr(results, "fitness"):
                         self.logger.info(f"  fitness: {results.fitness:.4f}")
 
             # Save final checkpoint
-            if hasattr(self.model, 'trainer') and self.model.trainer:
+            if hasattr(self.model, "trainer") and self.model.trainer:
                 self._save_final_checkpoint()
 
         except Exception as e:
@@ -611,33 +669,29 @@ class AircraftClassifierTrainer:
 
         # Get validation accuracy from metrics
         val_acc = 0.0
-        if hasattr(trainer, 'metrics') and trainer.metrics:
+        if hasattr(trainer, "metrics") and trainer.metrics:
             # Try to find accuracy in metrics
-            for key in ['metrics/accuracy_top1', 'accuracy_top1', 'acc', 'val_acc']:
+            for key in ["metrics/accuracy_top1", "accuracy_top1", "acc", "val_acc"]:
                 if key in trainer.metrics:
                     val_acc = float(trainer.metrics[key])
                     break
 
         # Get optimizer
-        optimizer = trainer.optimizer if hasattr(trainer, 'optimizer') else None
+        optimizer = trainer.optimizer if hasattr(trainer, "optimizer") else None
 
         # Save last checkpoint
-        last_path = self.checkpoint_dir / 'last.pt'
+        last_path = self.checkpoint_dir / "last.pt"
         if optimizer:
             save_custom_checkpoint(
-                self.model,
-                trainer.epoch,
-                optimizer,
-                val_acc,
-                last_path,
-                is_best=False
+                self.model, trainer.epoch, optimizer, val_acc, last_path, is_best=False
             )
             self.logger.info(f"Saved last checkpoint to: {last_path}")
 
         # Save best checkpoint if available
-        best_path = self.checkpoint_dir / 'best.pt'
-        if hasattr(trainer, 'best') and trainer.best.exists():
+        best_path = self.checkpoint_dir / "best.pt"
+        if hasattr(trainer, "best") and trainer.best.exists():
             import shutil
+
             shutil.copy(trainer.best, best_path)
             self.logger.info(f"Copied best checkpoint to: {best_path}")
 
@@ -656,14 +710,15 @@ def main() -> None:
     # Set environment variables for YOLO download paths
     # This ensures models are downloaded to training/model directory
     import os
+
     training_root = Path(__file__).parent.parent
-    model_dir = training_root / 'model'
+    model_dir = training_root / "model"
     model_dir.mkdir(parents=True, exist_ok=True)
 
     # Set YOLO environment variables
-    os.environ['YOLO_CONFIG_DIR'] = str(training_root / 'model')
+    os.environ["YOLO_CONFIG_DIR"] = str(training_root / "model")
     # Ultralytics uses this for model downloads
-    os.environ.setdefault('TORCH_HOME', str(model_dir))
+    os.environ.setdefault("TORCH_HOME", str(model_dir))
 
     # Parse arguments
     args = parse_arguments()
@@ -673,26 +728,28 @@ def main() -> None:
         if args.config and Path(args.config).exists():
             config_obj = load_config(args.config)
         else:
-            config_obj = load_config(modules=['training', 'paths'], load_all_modules=False)
+            config_obj = load_config(
+                modules=["training", "paths"], load_all_modules=False
+            )
     except FileNotFoundError as e:
         # If config file not found, use default modular config
         print(f"Warning: {e}")
         print("Using default modular configuration...")
-        config_obj = load_config(modules=['training', 'paths'], load_all_modules=False)
+        config_obj = load_config(modules=["training", "paths"], load_all_modules=False)
 
     # Get data path - YOLOv8 classification requires a directory, not a YAML file
     # 优先从 config yaml 读取（尝试从 latest.txt 读取最新的 split 目录）
     data_path = None
 
     # 1. 尝试从 splits/latest.txt 读取
-    splits_root = config_obj.get_path('data.splits.root')
+    splits_root = config_obj.get_path("data.splits.root")
     if splits_root:
-        latest_txt = Path(splits_root) / 'latest.txt'
+        latest_txt = Path(splits_root) / "latest.txt"
         if latest_txt.exists():
-            with open(latest_txt, 'r', encoding='utf-8') as f:
+            with open(latest_txt, "r", encoding="utf-8") as f:
                 latest_split_dir = f.read().strip()
             # Aerovision 分类数据集路径
-            aerovision_path = Path(latest_split_dir) / 'aerovision' / 'aircraft'
+            aerovision_path = Path(latest_split_dir) / "aerovision" / "aircraft"
             if aerovision_path.exists():
                 data_path = str(aerovision_path)
 
@@ -704,65 +761,106 @@ def main() -> None:
     # 优先级：config yaml > 命令行参数 > 默认值
     config = {
         # Model configuration - resolve model path from config
-        'model': config_obj.get('training.model.name') or args.model or 'yolov8n-cls.pt',
-        'resume': config_obj.get('training.resume') or args.resume or None,
-
+        "model": config_obj.get("training.model.name")
+        or args.model
+        or "yolov8n-cls.pt",
+        "resume": config_obj.get("training.resume") or args.resume or None,
         # Data configuration (must be a directory for classification)
-        'data': data_path,
-
+        "data": data_path,
         # Training parameters
-        'epochs': config_obj.get('training.epochs') or args.epochs or 100,
-        'batch_size': config_obj.get('training.batch_size') or args.batch_size or 32,
-        'imgsz': config_obj.get('training.image_size') or args.imgsz or 224,
-
+        "epochs": config_obj.get("training.epochs") or args.epochs or 100,
+        "batch_size": config_obj.get("training.batch_size") or args.batch_size or 32,
+        "imgsz": config_obj.get("training.image_size") or args.imgsz or 224,
         # Optimizer
-        'lr0': config_obj.get('training.optimizer.lr0') or args.lr0 or 0.001,
-        'optimizer': config_obj.get('training.optimizer.type') or args.optimizer or 'AdamW',
-        'momentum': config_obj.get('training.optimizer.momentum') or args.momentum or 0.937,
-        'weight_decay': config_obj.get('training.optimizer.weight_decay') or args.weight_decay or 0.0005,
-
+        "lr0": config_obj.get("training.optimizer.lr0") or args.lr0 or 0.001,
+        "optimizer": config_obj.get("training.optimizer.type")
+        or args.optimizer
+        or "AdamW",
+        "momentum": config_obj.get("training.optimizer.momentum")
+        or args.momentum
+        or 0.937,
+        "weight_decay": config_obj.get("training.optimizer.weight_decay")
+        or args.weight_decay
+        or 0.0005,
         # Learning rate scheduler
-        'cos_lr': config_obj.get('training.scheduler.cosine') if config_obj.get('training.scheduler.cosine') is not None else (args.cos_lr if hasattr(args, 'cos_lr') else True),
-        'lrf': config_obj.get('training.scheduler.lrf') or args.lrf or 0.01,
-
+        "cos_lr": config_obj.get("training.scheduler.cosine")
+        if config_obj.get("training.scheduler.cosine") is not None
+        else (args.cos_lr if hasattr(args, "cos_lr") else True),
+        "lrf": config_obj.get("training.scheduler.lrf") or args.lrf or 0.01,
         # Regularization
-        'dropout': config_obj.get('training.regularization.dropout') if config_obj.get('training.regularization.dropout') is not None else (args.dropout or 0.0),
-
+        "dropout": config_obj.get("training.regularization.dropout")
+        if config_obj.get("training.regularization.dropout") is not None
+        else (args.dropout or 0.0),
         # Early stopping
-        'patience': config_obj.get('training.early_stopping.patience') or args.patience or 50,
-
+        "patience": config_obj.get("training.early_stopping.patience")
+        or args.patience
+        or 50,
         # Warmup
-        'warmup_epochs': config_obj.get('training.warmup.epochs') or args.warmup_epochs or 3.0,
-
+        "warmup_epochs": config_obj.get("training.warmup.epochs")
+        or args.warmup_epochs
+        or 3.0,
         # Device
-        'device': config_obj.get('device.default') or args.device or '0',
-        'workers': config_obj.get('training.workers') or args.workers or 8,
-        'amp': config_obj.get('training.amp') if config_obj.get('training.amp') is not None else (args.amp if hasattr(args, 'amp') else True),
-
+        "device": config_obj.get("device.default") or args.device or "0",
+        "workers": config_obj.get("training.workers") or args.workers or 8,
+        "amp": config_obj.get("training.amp")
+        if config_obj.get("training.amp") is not None
+        else (args.amp if hasattr(args, "amp") else True),
         # Reproducibility
-        'seed': config_obj.get('seed.random') or args.seed or 42,
-
+        "seed": config_obj.get("seed.random") or args.seed or 42,
         # Saving - resolve all paths relative to training/ directory
         # Note: timestamp will be added to name later
-        'project': config_obj.get('training.output.project') or args.project or '../output/classify',
-        'name': config_obj.get('training.output.name') or args.name or 'aircraft_classifier',
-        'save_period': config_obj.get('training.save_period') if config_obj.get('training.save_period') is not None else (args.save_period or -1),
-
+        "project": config_obj.get("training.output.project")
+        or args.project
+        or "../output/classify",
+        "name": config_obj.get("training.output.name")
+        or args.name
+        or "aircraft_classifier",
+        "save_period": config_obj.get("training.save_period")
+        if config_obj.get("training.save_period") is not None
+        else (args.save_period or -1),
         # Store timestamp for directory naming
-        'timestamp': None,  # Will be set later
-
+        "timestamp": None,  # Will be set later
         # Checkpoint directory
-        'checkpoint_dir': config_obj.get('checkpoints.classify') or args.checkpoint_dir or '../ckpt/classify',
-
+        "checkpoint_dir": config_obj.get("checkpoints.classify")
+        or args.checkpoint_dir
+        or "../ckpt/classify",
         # Log directory
-        'log_dir': config_obj.get('logs.classify') or args.log_dir or '../logs/classify',
-
+        "log_dir": config_obj.get("logs.classify")
+        or args.log_dir
+        or "../logs/classify",
         # Validation and plots
-        'val': config_obj.get('training.validation.enabled') if config_obj.get('training.validation.enabled') is not None else (args.val if hasattr(args, 'val') else True),
-        'plots': config_obj.get('training.plots') if config_obj.get('training.plots') is not None else (args.plots if hasattr(args, 'plots') else True),
-
+        "val": config_obj.get("training.validation.enabled")
+        if config_obj.get("training.validation.enabled") is not None
+        else (args.val if hasattr(args, "val") else True),
+        "plots": config_obj.get("training.plots")
+        if config_obj.get("training.plots") is not None
+        else (args.plots if hasattr(args, "plots") else True),
         # TensorBoard logging
-        'tensorboard': config_obj.get('training.tensorboard') if config_obj.get('training.tensorboard') is not None else (args.tensorboard if hasattr(args, 'tensorboard') else True),
+        "tensorboard": config_obj.get("training.tensorboard")
+        if config_obj.get("training.tensorboard") is not None
+        else (args.tensorboard if hasattr(args, "tensorboard") else True),
+        # Advanced features
+        "accumulate": config_obj.get("training.advanced.accumulate")
+        or args.accumulate
+        or 1,
+        "confidence_penalty": config_obj.get("training.advanced.confidence_penalty")
+        or args.confidence_penalty
+        or 0.0,
+        "focal_loss": config_obj.get("training.advanced.focal_loss.enabled")
+        if config_obj.get("training.advanced.focal_loss.enabled") is not None
+        else args.focal_loss,
+        "focal_alpha": config_obj.get("training.advanced.focal_loss.alpha")
+        or args.focal_alpha
+        or 0.25,
+        "focal_gamma": config_obj.get("training.advanced.focal_loss.gamma")
+        or args.focal_gamma
+        or 2.0,
+        "mixup": config_obj.get("training.advanced.mixup.enabled")
+        if config_obj.get("training.advanced.mixup.enabled") is not None
+        else args.mixup,
+        "mixup_alpha": config_obj.get("training.advanced.mixup.alpha")
+        or args.mixup_alpha
+        or 0.4,
     }
 
     # Helper function to resolve config paths
@@ -773,7 +871,7 @@ def main() -> None:
             return path_str
 
         training_root = Path(__file__).parent.parent  # /training
-        config_dir = training_root / 'configs'  # /training/configs
+        config_dir = training_root / "configs"  # /training/configs
 
         # Resolve relative to config dir
         resolved = (config_dir / path_str).resolve()
@@ -782,44 +880,48 @@ def main() -> None:
     # Resolve data path
     if not Path(data_path).is_absolute():
         data_path = resolve_config_path(data_path)
-    config['data'] = data_path
+    config["data"] = data_path
 
     # Resolve model path
-    model_path = config['model']
+    model_path = config["model"]
     if not Path(model_path).is_absolute() and not Path(model_path).exists():
         # Try to find model in config paths
-        model_name = Path(model_path).stem.replace('-', '_')  # yolov8n-cls -> yolov8n_cls
-        config_model_path = config_obj.get(f'models.pretrained.{model_name}')
+        model_name = Path(model_path).stem.replace(
+            "-", "_"
+        )  # yolov8n-cls -> yolov8n_cls
+        config_model_path = config_obj.get(f"models.pretrained.{model_name}")
 
         if config_model_path:
             # Resolve from config
             resolved_model = resolve_config_path(config_model_path)
             if Path(resolved_model).exists():
-                config['model'] = resolved_model
+                config["model"] = resolved_model
             # else: keep original path, will be downloaded by YOLO
         else:
             # Check in model directory from config
-            model_dir = config_obj.get('models.root')
+            model_dir = config_obj.get("models.root")
             if model_dir:
-                resolved_model = resolve_config_path(f"{model_dir.rstrip('/')}/{model_path}")
+                resolved_model = resolve_config_path(
+                    f"{model_dir.rstrip('/')}/{model_path}"
+                )
                 if Path(resolved_model).exists():
-                    config['model'] = resolved_model
+                    config["model"] = resolved_model
         # If model doesn't exist locally, YOLO will auto-download it
 
     # Generate timestamp for this training session
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # Resolve project path
-    project_path = config['project']
+    project_path = config["project"]
     if not Path(project_path).is_absolute():
-        config['project'] = resolve_config_path(project_path)
+        config["project"] = resolve_config_path(project_path)
 
     # Add timestamp to experiment name
-    config['name'] = f"{config['name']}_{timestamp}"
-    config['timestamp'] = timestamp
+    config["name"] = f"{config['name']}_{timestamp}"
+    config["timestamp"] = timestamp
 
     # Resolve log directory path
-    log_dir_path = config['log_dir']
+    log_dir_path = config["log_dir"]
     if not Path(log_dir_path).is_absolute():
         log_dir_path = resolve_config_path(log_dir_path)
 
@@ -852,7 +954,7 @@ def main() -> None:
 
     # Verify dataset paths
     # YOLOv8 classification requires a directory structure with train/val/test subdirectories
-    data_dir = Path(config['data'])
+    data_dir = Path(config["data"])
 
     if not data_dir.exists():
         logger.error(f"Dataset directory not found: {data_dir}")
@@ -860,12 +962,14 @@ def main() -> None:
 
     if not data_dir.is_dir():
         logger.error(f"Data path must be a directory, not a file: {data_dir}")
-        logger.error("YOLOv8 classification requires directory structure: data_dir/train/, data_dir/val/, etc.")
+        logger.error(
+            "YOLOv8 classification requires directory structure: data_dir/train/, data_dir/val/, etc."
+        )
         sys.exit(1)
 
     # Check for train/val directories
-    train_path = data_dir / 'train'
-    val_path = data_dir / 'val'
+    train_path = data_dir / "train"
+    val_path = data_dir / "val"
 
     if not train_path.exists():
         logger.warning(f"Training path not found: {train_path}")
@@ -888,11 +992,11 @@ def main() -> None:
 
         # Recreate checkpoint directory with correct timestamp
         # 优先从 config 读取（config 已经合并了 yaml 和 args）
-        checkpoint_base = config.get('checkpoint_dir') or args.checkpoint_dir
+        checkpoint_base = config.get("checkpoint_dir") or args.checkpoint_dir
         if checkpoint_base:
             checkpoint_dir = trainer._resolve_training_path(checkpoint_base)
         else:
-            checkpoint_dir = trainer.training_root / 'ckpt' / 'classify'
+            checkpoint_dir = trainer.training_root / "ckpt" / "classify"
         trainer.checkpoint_dir = checkpoint_dir / timestamp
         trainer.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
@@ -914,5 +1018,5 @@ def main() -> None:
         sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
