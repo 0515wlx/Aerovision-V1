@@ -244,8 +244,8 @@ class PromptEngine:
 请严格按照以下JSON格式输出，不要包含任何其他内容：
 {
     "clarity": 0.85,
-    "block": 0.1,
-    "confidence": 0.6,
+    "block": 0.17,
+    "confidence": 0.66,
     "reasoning": "评估理由简述"
 }
 
