@@ -232,3 +232,4 @@ results
 training/test_results/
 
 .dvc
+/auto_annotate_output/
