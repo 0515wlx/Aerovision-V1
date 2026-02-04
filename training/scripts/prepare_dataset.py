@@ -142,6 +142,16 @@ class DatasetPreparer:
         self.stats['total'] = len(df)
         logger.info(f"加载了 {len(df)} 条标注记录")
 
+        if len(df) == 0:
+            logger.error("标注文件为空，无法准备数据集！")
+            logger.error("可能的原因:")
+            logger.error("  1. 机型过滤参数不正确（使用了错误的机型名称）")
+            logger.error("  2. 航司过滤参数不正确")
+            logger.error("  3. FGVC数据集中没有符合条件的数据")
+            logger.error("")
+            logger.error("提示: FGVC数据集使用简单名称，如 '747-100', '747-300'（无 'Boeing_' 前缀）")
+            raise ValueError("标注文件为空，无法准备数据集")
+
         return df
 
     def validate_columns(self, df: pd.DataFrame) -> bool:

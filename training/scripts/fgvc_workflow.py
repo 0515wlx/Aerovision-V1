@@ -86,6 +86,20 @@ def main() -> None:
     parser.add_argument("--skip-prepare", action="store_true", help="跳过数据准备阶段")
     parser.add_argument("--skip-split", action="store_true", help="跳过数据划分阶段")
 
+    # 数据过滤参数
+    parser.add_argument(
+        "--types",
+        type=str,
+        default="all",
+        help="包含的机型列表，逗号分隔，如 '737-800,A320' (默认: all 表示包含所有机型)"
+    )
+    parser.add_argument(
+        "--airlines",
+        type=str,
+        default="all",
+        help="包含的航司/制造商列表，逗号分隔，如 'Boeing,Airbus' (默认: all 表示包含所有航司)"
+    )
+
     args = parser.parse_args()
 
     logger.info("=" * 60)
@@ -93,6 +107,8 @@ def main() -> None:
     logger.info("=" * 60)
     logger.info(f"FGVC目录: {args.fgvc_dir}")
     logger.info(f"输出基础: {args.output_base}")
+    logger.info(f"包含机型: {args.types}")
+    logger.info(f"包含航司: {args.airlines}")
     logger.info("=" * 60)
     logger.info("")
 
@@ -123,6 +139,10 @@ def main() -> None:
                 output_dir,
                 "--split",
                 split,
+                "--types",
+                args.types,
+                "--airlines",
+                args.airlines,
             ]
 
             success, output = run_step(f"转换 {split} 集", cmd, timeout=300)

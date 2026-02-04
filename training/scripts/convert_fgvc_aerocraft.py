@@ -50,6 +50,8 @@ class FGVC_AircraftConverter:
         default_clarity: float = 0.9,
         default_block: float = 0.0,
         split: str = "train",
+        types_filter: str = "all",
+        airlines_filter: str = "all",
     ) -> None:
         """
         初始化转换器
@@ -60,6 +62,8 @@ class FGVC_AircraftConverter:
             default_clarity: 默认清晰度 (FGVC无此信息)
             default_block: 默认遮挡度 (FGVC无此信息)
             split: 使用哪个划分 (train/val/test)
+            types_filter: 机型过滤列表，逗号分隔，"all" 表示所有机型
+            airlines_filter: 航司过滤列表，逗号分隔，"all" 表示所有航司
         """
         self.fgvc_data_dir = Path(fgvc_data_dir)
         self.data_dir = self.fgvc_data_dir / "data"
@@ -69,6 +73,21 @@ class FGVC_AircraftConverter:
         self.default_clarity = default_clarity
         self.default_block = default_block
         self.split = split
+
+        # 解析过滤参数
+        self.types_filter = types_filter
+        self.airlines_filter = airlines_filter
+
+        # 解析过滤列表
+        if types_filter.lower() == "all":
+            self.types_list = None
+        else:
+            self.types_list = set(t.strip() for t in types_filter.split(","))
+
+        if airlines_filter.lower() == "all":
+            self.airlines_list = None
+        else:
+            self.airlines_list = set(a.strip() for a in airlines_filter.split(","))
 
         # 创建输出目录
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -195,6 +214,33 @@ class FGVC_AircraftConverter:
 
         return merged
 
+    def _filter_by_types_and_airlines(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        根据机型和航司过滤数据
+
+        Args:
+            df: 合并后的标注数据
+
+        Returns:
+            过滤后的DataFrame
+        """
+        original_count = len(df)
+        filtered_df = df.copy()
+
+        # 过滤机型
+        if self.types_list is not None:
+            filtered_df = filtered_df[filtered_df["typename"].isin(self.types_list)]
+            logger.info(f"机型过滤: 保留 {len(filtered_df)}/{original_count} 条记录")
+            logger.info(f"  包含的机型: {self.types_list}")
+
+        # 过滤航司
+        if self.airlines_list is not None:
+            filtered_df = filtered_df[filtered_df["airline"].isin(self.airlines_list)]
+            logger.info(f"航司过滤: 保留 {len(filtered_df)}/{len(df)} 条记录")
+            logger.info(f"  包含的航司: {self.airlines_list}")
+
+        return filtered_df
+
     def _filter_missing_images(
         self, df: pd.DataFrame, images_dir: Path
     ) -> pd.DataFrame:
@@ -246,6 +292,11 @@ class FGVC_AircraftConverter:
         """
         logger.info("转换为项目格式...")
 
+        # 检查DataFrame是否为空
+        if len(df) == 0:
+            logger.warning("DataFrame为空，没有数据可转换")
+            return pd.DataFrame(columns=["filename", "typename", "airline", "clarity", "block", "airplanearea"])
+
         project_data = []
 
         for _, row in df.iterrows():
@@ -274,7 +325,7 @@ class FGVC_AircraftConverter:
         result_df = pd.DataFrame(project_data)
 
         # 统计类别数量
-        self.stats["num_variants"] = result_df["typename"].nunique()
+        self.stats["num_variants"] = result_df["typename"].nunique() if "typename" in result_df.columns else 0
         self.stats["num_families"] = (
             result_df["family"].nunique() if "family" in result_df.columns else 0
         )
@@ -346,9 +397,33 @@ class FGVC_AircraftConverter:
         # 合并标注
         merged_df = self._merge_annotations(variant_df, family_df, manufacturer_df)
 
+        # 根据机型和航司过滤
+        merged_df = self._filter_by_types_and_airlines(merged_df)
+
         # 过滤缺失图片
         self.stats["total_images"] = len(merged_df)
         filtered_df = self._filter_missing_images(merged_df, self.images_dir)
+
+        # 检查是否有数据
+        if len(filtered_df) == 0:
+            logger.error("=" * 60)
+            logger.error("转换失败: 没有找到符合条件的记录！")
+            logger.error("=" * 60)
+            logger.error("可能的原因:")
+            logger.error("  1. 机型过滤参数不正确（使用了错误的机型名称）")
+            logger.error("  2. 航司过滤参数不正确")
+            logger.error("  3. FGVC数据集中没有符合条件的数据")
+            logger.error("")
+            logger.error("提示: FGVC数据集使用简单名称，如 '747-100', '747-300'（无 'Boeing_' 前缀）")
+            logger.error("")
+            if self.types_list is not None:
+                logger.error(f"  您提供的机型: {self.types_list}")
+            if self.airlines_list is not None:
+                logger.error(f"  您提供的航司: {self.airlines_list}")
+            logger.error("")
+            logger.error("请检查并修正 --types 和 --airlines 参数")
+            logger.error("=" * 60)
+            raise ValueError("没有找到符合条件的记录")
 
         # 转换为项目格式
         project_df = self._convert_to_project_format(filtered_df, boxes)
@@ -415,6 +490,18 @@ def main() -> None:
     parser.add_argument(
         "--block", type=float, default=0.0, help="默认遮挡度值 (默认: 0.0)"
     )
+    parser.add_argument(
+        "--types",
+        type=str,
+        default="all",
+        help="包含的机型列表，逗号分隔，如 'Boeing_737-800,Airbus_A320' (默认: all 表示包含所有机型)"
+    )
+    parser.add_argument(
+        "--airlines",
+        type=str,
+        default="all",
+        help="包含的航司/制造商列表，逗号分隔，如 'Boeing,Airbus' (默认: all 表示包含所有航司)"
+    )
 
     args = parser.parse_args()
 
@@ -425,6 +512,8 @@ def main() -> None:
     logger.info(f"  数据划分: {args.split}")
     logger.info(f"  默认清晰度: {args.clarity}")
     logger.info(f"  默认遮挡度: {args.block}")
+    logger.info(f"  包含机型: {args.types}")
+    logger.info(f"  包含航司: {args.airlines}")
     logger.info("=" * 60)
 
     # 创建转换器并执行转换
@@ -434,6 +523,8 @@ def main() -> None:
         default_clarity=args.clarity,
         default_block=args.block,
         split=args.split,
+        types_filter=args.types,
+        airlines_filter=args.airlines,
     )
 
     converter.convert()

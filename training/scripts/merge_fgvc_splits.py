@@ -61,6 +61,17 @@ def merge_fgvc_splits(
     merged_df = pd.concat([train_df, val_df, test_df], ignore_index=True)
     logger.info(f"  合并后: {len(merged_df)} 条")
 
+    # 检查是否为空
+    if len(merged_df) == 0:
+        logger.error("合并后的数据集为空！")
+        logger.error("可能的原因:")
+        logger.error("  1. 机型过滤参数不正确（使用了错误的机型名称）")
+        logger.error("  2. 航司过滤参数不正确")
+        logger.error("  3. FGVC数据集中没有符合条件的数据")
+        logger.error("")
+        logger.error("提示: FGVC数据集使用简单名称，如 '747-100', '747-300'（无 'Boeing_' 前缀）")
+        raise ValueError("合并后的数据集为空")
+
     # 统计信息
     num_variants = merged_df["typename"].nunique()
     num_airlines = merged_df["airline"].nunique()
