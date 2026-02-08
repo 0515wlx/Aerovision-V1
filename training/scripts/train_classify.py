@@ -47,6 +47,11 @@ from training_utils import (
     Mixup,
     CombinedLoss,
     apply_gradient_accumulation,
+    ElasticFaceArcFace,
+    ElasticFaceLossWrapper,
+    ElasticFaceWithYOLO,
+    stack_embeddings,
+    l2_norm,
 )
 
 from ultralytics import YOLO
@@ -306,6 +311,44 @@ def parse_arguments() -> argparse.Namespace:
         help="Mixup alpha parameter for Beta distribution",
     )
 
+    # ElasticFace loss arguments
+    parser.add_argument(
+        "--elastic-face",
+        action="store_true",
+        default=False,
+        help="Enable ElasticFace loss (combined with CE loss)",
+    )
+    parser.add_argument(
+        "--elastic-lambda",
+        type=float,
+        default=0.5,
+        help="Lambda weight for ElasticFace loss (total = CE + lambda * ElasticFace)",
+    )
+    parser.add_argument(
+        "--elastic-s",
+        type=float,
+        default=30.0,
+        help="Scale factor for ElasticFace logits",
+    )
+    parser.add_argument(
+        "--elastic-m",
+        type=float,
+        default=0.30,
+        help="Base margin for ElasticFace angular penalty",
+    )
+    parser.add_argument(
+        "--elastic-std",
+        type=float,
+        default=0.01,
+        help="Standard deviation for ElasticFace margin sampling",
+    )
+    parser.add_argument(
+        "--elastic-plus",
+        action="store_true",
+        default=False,
+        help="Use ElasticArcFace+ (adaptive margin based on difficulty)",
+    )
+
     return parser.parse_args()
 
 
@@ -465,6 +508,21 @@ class AircraftClassifierTrainer:
         else:
             self.mixup = None
 
+        # ElasticFace Loss
+        self.use_elastic_face = self.config.get("elastic_face", False)
+        self.elastic_lambda = self.config.get("elastic_lambda", 0.5)
+        self.elastic_s = self.config.get("elastic_s", 30.0)
+        self.elastic_m = self.config.get("elastic_m", 0.30)
+        self.elastic_std = self.config.get("elastic_std", 0.01)
+        self.elastic_plus = self.config.get("elastic_plus", False)
+        self.elastic_face_wrapper = None  # Will be initialized after model is loaded
+
+        if self.use_elastic_face:
+            self.logger.info(
+                f"ElasticFace enabled: lambda={self.elastic_lambda}, "
+                f"s={self.elastic_s}, m={self.elastic_m}, std={self.elastic_std}"
+            )
+
         # Initialize loss function (will be configured after model is loaded)
         self.loss_fn = None
 
@@ -523,6 +581,46 @@ class AircraftClassifierTrainer:
 
                 # Update config with actual model path
                 self.config["model"] = str(local_model_path)
+
+        # Initialize ElasticFace wrapper after model is loaded
+        self._init_elastic_face()
+
+    def _init_elastic_face(self) -> None:
+        """Initialize ElasticFace loss wrapper after model is loaded."""
+        if not self.use_elastic_face:
+            return
+
+        try:
+            # Get number of classes from dataset
+            data_path = Path(self.config["data"])
+            train_path = data_path / "train"
+            if train_path.exists():
+                # Count number of class directories
+                num_classes = len([d for d in train_path.iterdir() if d.is_dir()])
+            else:
+                # Fallback to a default value
+                num_classes = 10
+                self.logger.warning(
+                    f"Could not determine num_classes from dataset, using default: {num_classes}"
+                )
+
+            self.elastic_face_wrapper = ElasticFaceLossWrapper.from_yolo_model(
+                yolo_model=self.model,
+                num_classes=num_classes,
+                lambda_weight=self.elastic_lambda,
+                s=self.elastic_s,
+                m=self.elastic_m,
+                std=self.elastic_std,
+                plus=self.elastic_plus,
+            )
+            self.logger.info(
+                f"ElasticFace wrapper initialized: num_classes={num_classes}, "
+                f"embedding_dim={self.elastic_face_wrapper.embedding_dim}"
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to initialize ElasticFace wrapper: {e}")
+            self.elastic_face_wrapper = None
+            self.use_elastic_face = False
 
     def _setup_tensorboard(self) -> None:
         """Setup TensorBoard writer for logging."""
@@ -861,6 +959,25 @@ def main() -> None:
         "mixup_alpha": config_obj.get("training.advanced.mixup.alpha")
         or args.mixup_alpha
         or 0.4,
+        # ElasticFace loss configuration
+        "elastic_face": config_obj.get("training.advanced.elastic_face.enabled")
+        if config_obj.get("training.advanced.elastic_face.enabled") is not None
+        else args.elastic_face,
+        "elastic_lambda": config_obj.get("training.advanced.elastic_face.lambda_weight")
+        or args.elastic_lambda
+        or 0.5,
+        "elastic_s": config_obj.get("training.advanced.elastic_face.s")
+        or args.elastic_s
+        or 30.0,
+        "elastic_m": config_obj.get("training.advanced.elastic_face.m")
+        or args.elastic_m
+        or 0.30,
+        "elastic_std": config_obj.get("training.advanced.elastic_face.std")
+        or args.elastic_std
+        or 0.01,
+        "elastic_plus": config_obj.get("training.advanced.elastic_face.plus")
+        if config_obj.get("training.advanced.elastic_face.plus") is not None
+        else args.elastic_plus,
     }
 
     # Helper function to resolve config paths

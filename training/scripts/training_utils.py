@@ -281,3 +281,317 @@ def apply_gradient_accumulation(
         optimizer.zero_grad()
 
     return should_step
+
+
+def l2_norm(input: torch.Tensor, axis: int = 1) -> torch.Tensor:
+    """L2 normalize tensor along specified axis.
+
+    Args:
+        input: Input tensor
+        axis: Axis along which to normalize
+
+    Returns:
+        Normalized tensor
+    """
+    norm = torch.norm(input, 2, axis, keepdim=True)
+    output = torch.div(input, norm)
+    return output
+
+
+class ElasticFaceArcFace(nn.Module):
+    """ElasticArcFace loss for face recognition / fine-grained classification.
+
+    Implements ElasticFace: Elastic Margin Loss for Face Recognition
+    (https://arxiv.org/abs/2109.09138)
+
+    Uses dynamically sampled margins from a Gaussian distribution instead of
+    fixed margins, providing better generalization.
+
+    Args:
+        in_features: Dimension of input embeddings
+        out_features: Number of classes
+        s: Scale factor for logits. Default: 30.0 (YOLO-adapted)
+        m: Base margin for angular penalty. Default: 0.30 (YOLO-adapted)
+        std: Standard deviation for margin sampling. Default: 0.01 (YOLO-adapted)
+        plus: Whether to use ElasticArcFace+ (adaptive margin). Default: False
+    """
+
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        s: float = 30.0,
+        m: float = 0.30,
+        std: float = 0.01,
+        plus: bool = False,
+    ):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.s = s
+        self.m = m
+        self.std = std
+        self.plus = plus
+
+        # Learnable class centers (kernel weights)
+        self.kernel = nn.Parameter(torch.FloatTensor(in_features, out_features))
+        nn.init.normal_(self.kernel, std=0.01)
+
+    def forward(self, embeddings: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        """Compute ElasticArcFace logits.
+
+        Args:
+            embeddings: L2-normalized embeddings, shape (N, in_features)
+            labels: Ground truth labels, shape (N,)
+
+        Returns:
+            Logits with angular margin penalty, shape (N, out_features)
+        """
+        embeddings = l2_norm(embeddings, axis=1)
+        kernel_norm = l2_norm(self.kernel, axis=0)
+
+        # Compute cosine similarity
+        cos_theta = torch.mm(embeddings, kernel_norm)
+        cos_theta = cos_theta.clamp(-1, 1)  # for numerical stability
+
+        # Apply dynamic margin only to positive samples
+        index = torch.where(labels != -1)[0]
+        m_hot = torch.zeros(index.size()[0], cos_theta.size()[1], device=cos_theta.device)
+
+        # Sample margin from Gaussian distribution
+        margin = torch.normal(
+            mean=self.m, std=self.std, size=labels[index, None].size(), device=cos_theta.device
+        )
+
+        if self.plus:
+            # ElasticArcFace+: adaptive margin based on sample difficulty
+            with torch.no_grad():
+                distmat = cos_theta[index, labels.view(-1)].detach().clone()
+                _, idicate_cosie = torch.sort(distmat, dim=0, descending=True)
+                margin, _ = torch.sort(margin, dim=0)
+            m_hot.scatter_(1, labels[index, None], margin[idicate_cosie])
+        else:
+            m_hot.scatter_(1, labels[index, None], margin)
+
+        # Apply angular margin in cosine space
+        cos_theta.acos_()
+        cos_theta[index] += m_hot
+        cos_theta.cos_().mul_(self.s)
+
+        return cos_theta
+
+
+def stack_embeddings(embedding_list: list) -> torch.Tensor:
+    """Stack YOLO embed() output into a single tensor.
+
+    YOLO's embed() returns a list of tensors, one per sample.
+    This function stacks them into a (batch_size, embedding_dim) tensor.
+
+    Args:
+        embedding_list: List of tensors from YOLO embed()
+
+    Returns:
+        Stacked embeddings tensor, shape (batch_size, embedding_dim)
+    """
+    if not embedding_list:
+        raise ValueError("embedding_list is empty")
+
+    if len(embedding_list) == 1:
+        return embedding_list[0].unsqueeze(0)
+
+    return torch.stack(embedding_list, dim=0)
+
+
+class ElasticFaceLossWrapper(nn.Module):
+    """Wrapper for ElasticFace loss with YOLO embeddings.
+
+    Combines standard Cross-Entropy loss with ElasticFace loss:
+        total_loss = CE_loss + lambda * ElasticFace_loss
+
+    Args:
+        num_classes: Number of classes
+        embedding_dim: Dimension of embeddings (auto-detected from YOLO model)
+        lambda_weight: Weight for ElasticFace loss. Default: 0.5
+        s: Scale factor for logits. Default: 30.0
+        m: Base margin for angular penalty. Default: 0.30
+        std: Standard deviation for margin sampling. Default: 0.01
+        plus: Whether to use ElasticArcFace+. Default: False
+    """
+
+    def __init__(
+        self,
+        num_classes: int,
+        embedding_dim: int,
+        lambda_weight: float = 0.5,
+        s: float = 30.0,
+        m: float = 0.30,
+        std: float = 0.01,
+        plus: bool = False,
+    ):
+        super().__init__()
+        self.num_classes = num_classes
+        self.embedding_dim = embedding_dim
+        self.lambda_weight = lambda_weight
+
+        # ElasticFace loss
+        self.elastic_face = ElasticFaceArcFace(
+            in_features=embedding_dim,
+            out_features=num_classes,
+            s=s,
+            m=m,
+            std=std,
+            plus=plus,
+        )
+
+        # Standard cross-entropy loss
+        self.ce_loss = nn.CrossEntropyLoss(reduction="mean")
+
+        # Simple classifier for standard CE (L2-normalized weights)
+        self.classifier = nn.Linear(embedding_dim, num_classes, bias=False)
+        # Normalize weights for cosine similarity
+        with torch.no_grad():
+            nn.init.normal_(self.classifier.weight, std=0.01)
+            self.classifier.weight.data = l2_norm(self.classifier.weight.data, axis=1)
+
+    def forward(
+        self, embeddings: torch.Tensor, labels: torch.Tensor
+    ) -> tuple[torch.Tensor, dict]:
+        """Compute combined loss.
+
+        Args:
+            embeddings: L2-normalized embeddings, shape (N, embedding_dim)
+            labels: Ground truth labels, shape (N,)
+
+        Returns:
+            Tuple of (total_loss, loss_dict) where loss_dict contains:
+                - total_loss: Total combined loss
+                - ce_loss: Standard cross-entropy loss
+                - elastic_loss: ElasticFace loss
+        """
+        # Standard CE loss (cosine classifier)
+        ce_logits = self.classifier(embeddings) * self.elastic_face.s
+        ce_loss_value = self.ce_loss(ce_logits, labels)
+
+        # ElasticFace loss
+        elastic_logits = self.elastic_face(embeddings, labels)
+        elastic_loss_value = self.ce_loss(elastic_logits, labels)
+
+        # Combined loss
+        total_loss = ce_loss_value + self.lambda_weight * elastic_loss_value
+
+        loss_dict = {
+            "total_loss": total_loss.item(),
+            "ce_loss": ce_loss_value.item(),
+            "elastic_loss": elastic_loss_value.item(),
+        }
+
+        return total_loss, loss_dict
+
+    @classmethod
+    def from_yolo_model(
+        cls,
+        yolo_model,
+        num_classes: int,
+        lambda_weight: float = 0.5,
+        s: float = 30.0,
+        m: float = 0.30,
+        std: float = 0.01,
+        plus: bool = False,
+    ) -> "ElasticFaceLossWrapper":
+        """Create wrapper by auto-detecting embedding dimension from YOLO model.
+
+        Args:
+            yolo_model: YOLO model instance
+            num_classes: Number of classes
+            lambda_weight: Weight for ElasticFace loss
+            s: Scale factor for logits
+            m: Base margin for angular penalty
+            std: Standard deviation for margin sampling
+            plus: Whether to use ElasticArcFace+
+
+        Returns:
+            ElasticFaceLossWrapper instance
+        """
+        # Create dummy input to get embedding dimension
+        dummy_input = torch.randn(1, 3, 224, 224) / 255.0
+        dummy_embeddings = yolo_model.embed(dummy_input)
+        embedding_dim = dummy_embeddings[0].shape[0]
+
+        return cls(
+            num_classes=num_classes,
+            embedding_dim=embedding_dim,
+            lambda_weight=lambda_weight,
+            s=s,
+            m=m,
+            std=std,
+            plus=plus,
+        )
+
+
+class ElasticFaceWithYOLO(nn.Module):
+    """Complete ElasticFace loss module with YOLO embedding extraction.
+
+    This module handles the full pipeline:
+    1. Extract embeddings from YOLO model via embed()
+    2. Stack embeddings into tensor
+    3. Compute combined CE + ElasticFace loss
+
+    Args:
+        yolo_model: YOLO classification model
+        num_classes: Number of classes
+        lambda_weight: Weight for ElasticFace loss. Default: 0.5
+        s: Scale factor for logits. Default: 30.0
+        m: Base margin for angular penalty. Default: 0.30
+        std: Standard deviation for margin sampling. Default: 0.01
+        plus: Whether to use ElasticArcFace+. Default: False
+    """
+
+    def __init__(
+        self,
+        yolo_model,
+        num_classes: int,
+        lambda_weight: float = 0.5,
+        s: float = 30.0,
+        m: float = 0.30,
+        std: float = 0.01,
+        plus: bool = False,
+    ):
+        super().__init__()
+        self.yolo_model = yolo_model
+
+        # Auto-detect embedding dimension
+        dummy_input = torch.randn(1, 3, 224, 224) / 255.0
+        dummy_embeddings = yolo_model.embed(dummy_input)
+        embedding_dim = dummy_embeddings[0].shape[0]
+
+        self.elastic_wrapper = ElasticFaceLossWrapper(
+            num_classes=num_classes,
+            embedding_dim=embedding_dim,
+            lambda_weight=lambda_weight,
+            s=s,
+            m=m,
+            std=std,
+            plus=plus,
+        )
+
+    def forward(self, images: torch.Tensor, labels: torch.Tensor) -> tuple[torch.Tensor, dict]:
+        """Compute loss from images and labels.
+
+        Args:
+            images: Input images, shape (N, C, H, W)
+            labels: Ground truth labels, shape (N,)
+
+        Returns:
+            Tuple of (total_loss, loss_dict)
+        """
+        # Get embeddings from YOLO model
+        embedding_list = self.yolo_model.embed(images)
+
+        # Stack into tensor
+        embeddings = stack_embeddings(embedding_list)
+
+        # L2 normalize (required for ElasticFace)
+        embeddings = l2_norm(embeddings, axis=1)
+
+        # Compute loss
+        return self.elastic_wrapper(embeddings, labels)
