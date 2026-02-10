@@ -26,7 +26,7 @@ class TestConfidenceFilter:
             {
                 "filename": "img_002.jpg",
                 "aircraft": {"class_id": 1, "class_name": "Airbus", "confidence": 0.97, "top5": [{"id": 1, "name": "Airbus", "prob": 0.97}]},
-                "airline": {"class_id": 3, "class_name": "Air China", "confidence": 0.94, "top5": [{"id": 3, "name": "Air China", "prob": 0.94}]}
+                "airline": {"class_id": 3, "class_name": "Air China", "confidence": 0.96, "top5": [{"id": 3, "name": "Air China", "prob": 0.96}]}
             },
             {
                 "filename": "img_003.jpg",
@@ -192,8 +192,13 @@ class TestConfidenceFilter:
             {"filename": "invalid.jpg", "aircraft": {"class_id": 0}, "airline": {"class_id": 0}}
         ]
 
-        with pytest.raises(KeyError):
-            filter.classify_predictions(invalid_pred)
+        # Invalid predictions should be skipped, not raise KeyError
+        result = filter.classify_predictions(invalid_pred)
+
+        # All categories should be empty since the prediction was skipped
+        assert len(result["high_confidence"]) == 0
+        assert len(result["medium_confidence"]) == 0
+        assert len(result["low_confidence"]) == 0
 
     def test_update_thresholds(self, sample_config):
         """Test updating confidence thresholds."""

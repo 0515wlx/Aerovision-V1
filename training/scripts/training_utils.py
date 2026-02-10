@@ -307,13 +307,20 @@ class ElasticFaceArcFace(nn.Module):
     Uses dynamically sampled margins from a Gaussian distribution instead of
     fixed margins, providing better generalization.
 
+    Supports four types:
+        - cos: CosFace (margin in cosine space)
+        - arc: ArcFace (margin in angular space)
+        - cos+: CosFace+ (adaptive margin in cosine space)
+        - arc+: ArcFace+ (adaptive margin in angular space)
+
     Args:
         in_features: Dimension of input embeddings
         out_features: Number of classes
         s: Scale factor for logits. Default: 30.0 (YOLO-adapted)
         m: Base margin for angular penalty. Default: 0.30 (YOLO-adapted)
         std: Standard deviation for margin sampling. Default: 0.01 (YOLO-adapted)
-        plus: Whether to use ElasticArcFace+ (adaptive margin). Default: False
+        type: Loss type - "cos", "arc", "cos+", "arc+". Default: "arc"
+        plus: (Deprecated) Whether to use adaptive margin. Use type="arc+" instead.
     """
 
     def __init__(
@@ -323,6 +330,7 @@ class ElasticFaceArcFace(nn.Module):
         s: float = 30.0,
         m: float = 0.30,
         std: float = 0.01,
+        type: str = "arc",
         plus: bool = False,
     ):
         super().__init__()
@@ -331,21 +339,49 @@ class ElasticFaceArcFace(nn.Module):
         self.s = s
         self.m = m
         self.std = std
-        self.plus = plus
+
+        # Parse type parameter and set plus flag
+        valid_types = ["cos", "arc", "cos+", "arc+"]
+        type_lower = type.lower()
+
+        if type_lower not in valid_types:
+            raise ValueError(
+                f"Invalid type '{type}'. Must be one of {valid_types}"
+            )
+
+        # Handle type variants
+        if type_lower == "cos+":
+            self.type = "cos+"
+            self.plus = True
+        elif type_lower == "arc+":
+            self.type = "arc+"
+            self.plus = True
+        else:
+            self.type = type_lower
+            # For backward compatibility: if plus=True is explicitly set,
+            # upgrade the type
+            if plus and type_lower == "cos":
+                self.type = "cos+"
+                self.plus = True
+            elif plus and type_lower == "arc":
+                self.type = "arc+"
+                self.plus = True
+            else:
+                self.plus = plus
 
         # Learnable class centers (kernel weights)
         self.kernel = nn.Parameter(torch.FloatTensor(in_features, out_features))
         nn.init.normal_(self.kernel, std=0.01)
 
     def forward(self, embeddings: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-        """Compute ElasticArcFace logits.
+        """Compute ElasticFace logits.
 
         Args:
             embeddings: L2-normalized embeddings, shape (N, in_features)
             labels: Ground truth labels, shape (N,)
 
         Returns:
-            Logits with angular margin penalty, shape (N, out_features)
+            Logits with margin penalty, shape (N, out_features)
         """
         embeddings = l2_norm(embeddings, axis=1)
         kernel_norm = l2_norm(self.kernel, axis=0)
@@ -364,7 +400,7 @@ class ElasticFaceArcFace(nn.Module):
         )
 
         if self.plus:
-            # ElasticArcFace+: adaptive margin based on sample difficulty
+            # ElasticFace+: adaptive margin based on sample difficulty
             with torch.no_grad():
                 distmat = cos_theta[index, labels.view(-1)].detach().clone()
                 _, idicate_cosie = torch.sort(distmat, dim=0, descending=True)
@@ -373,10 +409,17 @@ class ElasticFaceArcFace(nn.Module):
         else:
             m_hot.scatter_(1, labels[index, None], margin)
 
-        # Apply angular margin in cosine space
-        cos_theta.acos_()
-        cos_theta[index] += m_hot
-        cos_theta.cos_().mul_(self.s)
+        # Apply margin based on type
+        if self.type in ["arc", "arc+"]:
+            # ArcFace: apply margin in angular space
+            cos_theta.acos_()
+            cos_theta[index] -= m_hot  # Subtract margin in angular space
+            cos_theta.cos_().mul_(self.s)
+        else:  # cos, cos+
+            # CosFace: apply margin directly in cosine space
+            # cos_theta - m (subtract margin from cosine)
+            cos_theta[index] -= m_hot
+            cos_theta.mul_(self.s)
 
         return cos_theta
 
@@ -415,7 +458,8 @@ class ElasticFaceLossWrapper(nn.Module):
         s: Scale factor for logits. Default: 30.0
         m: Base margin for angular penalty. Default: 0.30
         std: Standard deviation for margin sampling. Default: 0.01
-        plus: Whether to use ElasticArcFace+. Default: False
+        type: Loss type - "cos", "arc", "cos+", "arc+". Default: "arc"
+        plus: (Deprecated) Whether to use ElasticArcFace+. Use type="arc+" instead.
     """
 
     def __init__(
@@ -426,6 +470,7 @@ class ElasticFaceLossWrapper(nn.Module):
         s: float = 30.0,
         m: float = 0.30,
         std: float = 0.01,
+        type: str = "arc",
         plus: bool = False,
     ):
         super().__init__()
@@ -440,6 +485,7 @@ class ElasticFaceLossWrapper(nn.Module):
             s=s,
             m=m,
             std=std,
+            type=type,
             plus=plus,
         )
 
@@ -496,6 +542,7 @@ class ElasticFaceLossWrapper(nn.Module):
         s: float = 30.0,
         m: float = 0.30,
         std: float = 0.01,
+        type: str = "arc",
         plus: bool = False,
     ) -> "ElasticFaceLossWrapper":
         """Create wrapper by auto-detecting embedding dimension from YOLO model.
@@ -507,7 +554,8 @@ class ElasticFaceLossWrapper(nn.Module):
             s: Scale factor for logits
             m: Base margin for angular penalty
             std: Standard deviation for margin sampling
-            plus: Whether to use ElasticArcFace+
+            type: Loss type - "cos", "arc", "cos+", "arc+"
+            plus: (Deprecated) Whether to use ElasticArcFace+
 
         Returns:
             ElasticFaceLossWrapper instance
@@ -524,6 +572,7 @@ class ElasticFaceLossWrapper(nn.Module):
             s=s,
             m=m,
             std=std,
+            type=type,
             plus=plus,
         )
 
@@ -543,7 +592,8 @@ class ElasticFaceWithYOLO(nn.Module):
         s: Scale factor for logits. Default: 30.0
         m: Base margin for angular penalty. Default: 0.30
         std: Standard deviation for margin sampling. Default: 0.01
-        plus: Whether to use ElasticArcFace+. Default: False
+        type: Loss type - "cos", "arc", "cos+", "arc+". Default: "arc"
+        plus: (Deprecated) Whether to use ElasticArcFace+. Default: False
     """
 
     def __init__(
@@ -554,6 +604,7 @@ class ElasticFaceWithYOLO(nn.Module):
         s: float = 30.0,
         m: float = 0.30,
         std: float = 0.01,
+        type: str = "arc",
         plus: bool = False,
     ):
         super().__init__()
@@ -571,6 +622,7 @@ class ElasticFaceWithYOLO(nn.Module):
             s=s,
             m=m,
             std=std,
+            type=type,
             plus=plus,
         )
 

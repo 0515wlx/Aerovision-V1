@@ -118,7 +118,7 @@ class HDBSCANNewClassDetector:
         self._cluster_embeddings(embeddings)
 
         # Get outlier indices (label = -1)
-        outlier_indices = np.where(self._labels == -1)[0]
+        outlier_indices = np.flatnonzero(self._labels == -1)
 
         logger.info(
             f"Found {len(outlier_indices)} potential new class samples "

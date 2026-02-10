@@ -348,6 +348,13 @@ def parse_arguments() -> argparse.Namespace:
         default=False,
         help="Use ElasticArcFace+ (adaptive margin based on difficulty)",
     )
+    parser.add_argument(
+        "--elastic-type",
+        type=str,
+        default="arc",
+        choices=["cos", "arc", "cos+", "arc+"],
+        help="ElasticFace loss type: cos (CosFace), arc (ArcFace), cos+ (CosFace+), arc+ (ArcFace+)",
+    )
 
     return parser.parse_args()
 
@@ -515,11 +522,12 @@ class AircraftClassifierTrainer:
         self.elastic_m = self.config.get("elastic_m", 0.30)
         self.elastic_std = self.config.get("elastic_std", 0.01)
         self.elastic_plus = self.config.get("elastic_plus", False)
+        self.elastic_type = self.config.get("elastic_type", "arc")
         self.elastic_face_wrapper = None  # Will be initialized after model is loaded
 
         if self.use_elastic_face:
             self.logger.info(
-                f"ElasticFace enabled: lambda={self.elastic_lambda}, "
+                f"ElasticFace enabled: type={self.elastic_type}, lambda={self.elastic_lambda}, "
                 f"s={self.elastic_s}, m={self.elastic_m}, std={self.elastic_std}"
             )
 
@@ -611,6 +619,7 @@ class AircraftClassifierTrainer:
                 s=self.elastic_s,
                 m=self.elastic_m,
                 std=self.elastic_std,
+                type=self.elastic_type,
                 plus=self.elastic_plus,
             )
             self.logger.info(
@@ -978,6 +987,9 @@ def main() -> None:
         "elastic_plus": config_obj.get("training.advanced.elastic_face.plus")
         if config_obj.get("training.advanced.elastic_face.plus") is not None
         else args.elastic_plus,
+        "elastic_type": config_obj.get("training.advanced.elastic_face.type")
+        if config_obj.get("training.advanced.elastic_face.type") is not None
+        else args.elastic_type,
     }
 
     # Helper function to resolve config paths

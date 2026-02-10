@@ -7,7 +7,7 @@ training:
   epochs: 200
 
   # 批次大小
-  batch_size: 32
+  batch_size: 16
 
   # 图片尺寸
   image_size: 640
@@ -42,7 +42,8 @@ training:
 
     # ElasticFace Loss（基于动态 margin 的角度损失）
     elastic_face:
-      enabled: true
+      enabled: false
+      type: "cos+"       # ElasticFace 类型: cos, arc, cos+, arc+ (CosFace, ArcFace, CosFace+, ArcFace+)
       lambda_weight: 0.5  # ElasticFace loss 权重 (total = CE + lambda * ElasticFace)
       s: 30.0            # 缩放因子 (YOLO-adapted, 原论文推荐 64.0)
       m: 0.30            # 基础 margin (YOLO-adapted, 原论文推荐 0.50)
@@ -52,7 +53,7 @@ training:
   # 模型配置
   model:
     # YOLOv8 预训练模型名称或路径
-    name: "yolov8n-cls.pt"
+    name: "yolo26x-cls.pt"
 
   # 优化器配置
   optimizer:

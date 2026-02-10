@@ -23,28 +23,44 @@ class TestFileOrganizer:
             {
                 "filename": "img_001.jpg",
                 "aircraft": {"class_id": 0, "class_name": "Boeing", "confidence": 0.98},
-                "airline": {"class_id": 2, "class_name": "China Eastern", "confidence": 0.96}
+                "airline": {
+                    "class_id": 2,
+                    "class_name": "China Eastern",
+                    "confidence": 0.96,
+                },
             },
             {
                 "filename": "img_002.png",
                 "aircraft": {"class_id": 1, "class_name": "Airbus", "confidence": 0.97},
-                "airline": {"class_id": 3, "class_name": "Air China", "confidence": 0.94}
+                "airline": {
+                    "class_id": 3,
+                    "class_name": "Air China",
+                    "confidence": 0.94,
+                },
             },
             {
                 "filename": "img_003.jpeg",
-                "aircraft": {"class_id": 2, "class_name": "Antonov", "confidence": 0.92},
-                "airline": {"class_id": 1, "class_name": "United Airlines", "confidence": 0.88}
-            }
+                "aircraft": {
+                    "class_id": 2,
+                    "class_name": "Antonov",
+                    "confidence": 0.92,
+                },
+                "airline": {
+                    "class_id": 1,
+                    "class_name": "United Airlines",
+                    "confidence": 0.88,
+                },
+            },
         ]
 
     @pytest.fixture
-    def sample_config(self):
+    def sample_config(self, tmp_path):
         """Sample configuration for FileOrganizer."""
         return {
-            "raw_images_dir": "/mnt/disk/AeroVision/images",
-            "labeled_dir": "/mnt/disk/AeroVision/labeled",
-            "filtered_new_class_dir": "/mnt/disk/AeroVision/filtered_new_class",
-            "filtered_95_dir": "/mnt/disk/AeroVision/filtered_95"
+            "raw_images_dir": str(tmp_path / "images"),
+            "labeled_dir": str(tmp_path / "labeled"),
+            "filtered_new_class_dir": str(tmp_path / "filtered_new_class"),
+            "filtered_95_dir": str(tmp_path / "filtered_95"),
         }
 
     @pytest.fixture
@@ -62,14 +78,16 @@ class TestFileOrganizer:
         # Create some test images
         test_images = raw_dir / "test_images"
         test_images.mkdir()
-        for i in range(3):
-            (test_images / f"img_{i:03d}.jpg").write_text(f"test image {i}")
+        (test_images / "img_001.jpg").write_text("test image 1")
+        (test_images / "img_002.png").write_text("test image 2")
+        (test_images / "img_003.jpeg").write_text("test image 3")
+        (test_images / "img_000.jpg").write_text("test image 0")
 
         return {
             "raw": str(test_images),
             "labeled": str(labeled_dir),
             "new_class": str(new_class_dir),
-            "filtered_95": str(filtered_95_dir)
+            "filtered_95": str(filtered_95_dir),
         }
 
     def test_file_organizer_initialization(self, sample_config):
@@ -78,10 +96,12 @@ class TestFileOrganizer:
 
         organizer = FileOrganizer(sample_config)
 
-        assert organizer.raw_images_dir == sample_config["raw_images_dir"]
-        assert organizer.labeled_dir == sample_config["labeled_dir"]
-        assert organizer.filtered_new_class_dir == sample_config["filtered_new_class_dir"]
-        assert organizer.filtered_95_dir == sample_config["filtered_95_dir"]
+        assert organizer.raw_images_dir == Path(sample_config["raw_images_dir"])
+        assert organizer.labeled_dir == Path(sample_config["labeled_dir"])
+        assert (
+            organizer.filtered_new_class_dir == Path(sample_config["filtered_new_class_dir"])
+        )
+        assert organizer.filtered_95_dir == Path(sample_config["filtered_95_dir"])
 
     def test_create_class_name_directory(self, sample_config, tmp_path):
         """Test creating class name directory."""
@@ -105,10 +125,14 @@ class TestFileOrganizer:
 
         # Test various class names
         assert organizer._create_safe_class_name("Boeing 737-800") == "Boeing_737-800"
-        assert organizer._create_safe_class_name("Airbus A320/A321") == "Airbus_A320_A321"
+        assert (
+            organizer._create_safe_class_name("Airbus A320/A321") == "Airbus_A320_A321"
+        )
         assert organizer._create_safe_class_name("China\\Eastern") == "China_Eastern"
 
-    def test_organize_labeled_images(self, sample_predictions, sample_config, temp_dirs):
+    def test_organize_labeled_images(
+        self, sample_predictions, sample_config, temp_dirs
+    ):
         """Test organizing images into labeled directory."""
         from scripts.auto_annotate.file_organizer import FileOrganizer
 
@@ -135,7 +159,9 @@ class TestFileOrganizer:
         assert (airbus_dir / "img_002.png").exists()
         assert (antonov_dir / "img_003.jpeg").exists()
 
-    def test_organize_new_class_images(self, sample_predictions, sample_config, temp_dirs):
+    def test_organize_new_class_images(
+        self, sample_predictions, sample_config, temp_dirs
+    ):
         """Test organizing images into filtered_new_class directory."""
         from scripts.auto_annotate.file_organizer import FileOrganizer
 
@@ -152,7 +178,9 @@ class TestFileOrganizer:
         assert (new_class_path / "img_002.png").exists()
         assert (new_class_path / "img_003.jpeg").exists()
 
-    def test_organize_filtered_95_images(self, sample_predictions, sample_config, temp_dirs):
+    def test_organize_filtered_95_images(
+        self, sample_predictions, sample_config, temp_dirs
+    ):
         """Test organizing images into filtered_95 directory."""
         from scripts.auto_annotate.file_organizer import FileOrganizer
 
@@ -169,7 +197,9 @@ class TestFileOrganizer:
         assert (filtered_95_path / "img_002.png").exists()
         assert (filtered_95_path / "img_003.jpeg").exists()
 
-    def test_save_prediction_details(self, sample_predictions, sample_config, temp_dirs):
+    def test_save_prediction_details(
+        self, sample_predictions, sample_config, temp_dirs
+    ):
         """Test saving prediction details to JSON."""
         from scripts.auto_annotate.file_organizer import FileOrganizer
 
@@ -180,18 +210,18 @@ class TestFileOrganizer:
         organizer = FileOrganizer(config)
 
         # Save for new class
-        organizer.save_prediction_details(sample_predictions, "new_class")
+        organizer.save_prediction_details(sample_predictions, None, "new_class")
 
         new_class_details = Path(temp_dirs["new_class"]) / "prediction_details.json"
         assert new_class_details.exists()
 
-        with open(new_class_details, 'r') as f:
+        with open(new_class_details, "r") as f:
             data = json.load(f)
             assert "predictions" in data
             assert len(data["predictions"]) == 3
 
         # Save for filtered_95
-        organizer.save_prediction_details(sample_predictions, "filtered_95")
+        organizer.save_prediction_details(sample_predictions, None, "filtered_95")
 
         filtered_95_details = Path(temp_dirs["filtered_95"]) / "prediction_details.json"
         assert filtered_95_details.exists()
@@ -209,7 +239,7 @@ class TestFileOrganizer:
         # Create test prediction
         prediction = {
             "filename": "img_000.jpg",
-            "aircraft": {"class_name": "Boeing", "confidence": 0.98}
+            "aircraft": {"class_name": "Boeing", "confidence": 0.98},
         }
 
         organizer._copy_image_to_class_dir(prediction)
@@ -231,7 +261,7 @@ class TestFileOrganizer:
         # Create prediction for non-existent image
         prediction = {
             "filename": "nonexistent.jpg",
-            "aircraft": {"class_name": "Boeing", "confidence": 0.98}
+            "aircraft": {"class_name": "Boeing", "confidence": 0.98},
         }
 
         # Should not raise exception, but log warning

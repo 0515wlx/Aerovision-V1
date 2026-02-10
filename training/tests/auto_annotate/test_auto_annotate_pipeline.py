@@ -17,23 +17,23 @@ class TestAutoAnnotatePipeline:
     """Test suite for AutoAnnotatePipeline class."""
 
     @pytest.fixture
-    def sample_config(self):
+    def sample_config(self, tmp_path):
         """Sample configuration for AutoAnnotatePipeline."""
+        # Create dummy model files
+        (tmp_path / "aircraft_model.pt").write_bytes(b"dummy model")
+        (tmp_path / "airline_model.pt").write_bytes(b"dummy model")
+
         return {
-            "raw_images_dir": "/mnt/disk/AeroVision/images",
-            "labeled_dir": "/mnt/disk/AeroVision/labeled",
-            "filtered_new_class_dir": "/mnt/disk/AeroVision/filtered_new_class",
-            "filtered_95_dir": "/mnt/disk/AeroVision/filtered_95",
-            "aircraft_model_path": "/home/wlx/yolo26x-cls-aircraft.pt",
-            "airline_model_path": "/home/wlx/yolo26x-cls-airline.pt",
+            "raw_images_dir": str(tmp_path / "images"),
+            "labeled_dir": str(tmp_path / "labeled"),
+            "filtered_new_class_dir": str(tmp_path / "filtered_new_class"),
+            "filtered_95_dir": str(tmp_path / "filtered_95"),
+            "aircraft_model_path": str(tmp_path / "aircraft_model.pt"),
+            "airline_model_path": str(tmp_path / "airline_model.pt"),
             "high_confidence_threshold": 0.95,
-            "hdbscan": {
-                "min_cluster_size": 5,
-                "min_samples": 3,
-                "metric": "euclidean"
-            },
+            "hdbscan": {"min_cluster_size": 5, "min_samples": 3, "metric": "euclidean"},
             "device": "cpu",
-            "batch_size": 32
+            "batch_size": 32,
         }
 
     @pytest.fixture
@@ -56,7 +56,7 @@ class TestAutoAnnotatePipeline:
             "raw": str(raw_dir),
             "labeled": str(labeled_dir),
             "new_class": str(new_class_dir),
-            "filtered_95": str(filtered_95_dir)
+            "filtered_95": str(filtered_95_dir),
         }
 
     @pytest.fixture
@@ -66,40 +66,71 @@ class TestAutoAnnotatePipeline:
             {
                 "filename": "img_000.jpg",
                 "aircraft": {"class_id": 0, "class_name": "Boeing", "confidence": 0.98},
-                "airline": {"class_id": 2, "class_name": "China Eastern", "confidence": 0.96}
+                "airline": {
+                    "class_id": 2,
+                    "class_name": "China Eastern",
+                    "confidence": 0.96,
+                },
+                "embeddings": np.array([0.1, 0.2, 0.3, 0.4]),
             },
             {
                 "filename": "img_001.jpg",
                 "aircraft": {"class_id": 1, "class_name": "Airbus", "confidence": 0.97},
-                "airline": {"class_id": 3, "class_name": "Air China", "confidence": 0.94}
+                "airline": {
+                    "class_id": 3,
+                    "class_name": "Air China",
+                    "confidence": 0.96,
+                },
+                "embeddings": np.array([0.1, 0.2, 0.3, 0.4]),
             },
             {
                 "filename": "img_002.jpg",
-                "aircraft": {"class_id": 2, "class_name": "Antonov", "confidence": 0.92},
-                "airline": {"class_id": 1, "class_name": "United Airlines", "confidence": 0.88}
+                "aircraft": {
+                    "class_id": 2,
+                    "class_name": "Antonov",
+                    "confidence": 0.92,
+                },
+                "airline": {
+                    "class_id": 1,
+                    "class_name": "United Airlines",
+                    "confidence": 0.88,
+                },
+                "embeddings": np.array([0.5, 0.6, 0.7, 0.8]),
             },
             {
                 "filename": "img_003.jpg",
-                "aircraft": {"class_id": 5, "class_name": "Unknown", "confidence": 0.65},
-                "airline": {"class_id": 0, "class_name": "Unknown", "confidence": 0.55}
+                "aircraft": {
+                    "class_id": 5,
+                    "class_name": "Unknown",
+                    "confidence": 0.65,
+                },
+                "airline": {"class_id": 0, "class_name": "Unknown", "confidence": 0.55},
+                "embeddings": np.array([0.9, 1.0, 0.1, 0.2]),
             },
             {
                 "filename": "img_004.jpg",
-                "aircraft": {"class_id": 3, "class_name": "Embraer", "confidence": 0.78},
-                "airline": {"class_id": 4, "class_name": "Delta", "confidence": 0.72}
-            }
+                "aircraft": {
+                    "class_id": 3,
+                    "class_name": "Embraer",
+                    "confidence": 0.78,
+                },
+                "airline": {"class_id": 4, "class_name": "Delta", "confidence": 0.72},
+                "embeddings": np.array([0.9, 1.0, 0.1, 0.2]),
+            },
         ]
 
     @pytest.fixture
     def sample_embeddings(self):
         """Sample embeddings for testing."""
-        return np.array([
-            [0.1, 0.2, 0.3, 0.4],
-            [0.1, 0.2, 0.3, 0.4],
-            [0.5, 0.6, 0.7, 0.8],
-            [0.9, 1.0, 0.1, 0.2],
-            [0.9, 1.0, 0.1, 0.2]
-        ])
+        return np.array(
+            [
+                [0.1, 0.2, 0.3, 0.4],
+                [0.1, 0.2, 0.3, 0.4],
+                [0.5, 0.6, 0.7, 0.8],
+                [0.9, 1.0, 0.1, 0.2],
+                [0.9, 1.0, 0.1, 0.2],
+            ]
+        )
 
     def test_pipeline_initialization(self, sample_config):
         """Test that AutoAnnotatePipeline initializes correctly."""
@@ -108,13 +139,13 @@ class TestAutoAnnotatePipeline:
         pipeline = AutoAnnotatePipeline(sample_config)
 
         assert pipeline.config == sample_config
-        assert pipeline.raw_images_dir == sample_config["raw_images_dir"]
+        assert pipeline.raw_images_dir == Path(sample_config["raw_images_dir"])
 
     def test_pipeline_load_models(self, sample_config):
         """Test loading models in pipeline."""
         from scripts.auto_annotate.pipeline import AutoAnnotatePipeline
 
-        with patch('scripts.auto_annotate.model_predictor.YOLO') as mock_yolo:
+        with patch("scripts.auto_annotate.model_predictor.YOLO") as mock_yolo:
             pipeline = AutoAnnotatePipeline(sample_config)
             pipeline.load_models()
 
@@ -142,30 +173,42 @@ class TestAutoAnnotatePipeline:
         config = sample_config.copy()
         config["raw_images_dir"] = temp_dirs["raw"]
 
-        with patch('scripts.auto_annotate.model_predictor.YOLO'):
+        with patch("scripts.auto_annotate.model_predictor.YOLO"):
             pipeline = AutoAnnotatePipeline(config)
             pipeline.load_models()
 
             # Mock predict_batch to return sample predictions
-            with patch.object(pipeline.model_predictor, 'predict_batch', return_value=sample_predictions):
-                predictions = pipeline.predict_batch([f"img_{i:03d}.jpg" for i in range(5)])
+            with patch.object(
+                pipeline.model_predictor,
+                "predict_batch",
+                return_value=sample_predictions,
+            ):
+                predictions = pipeline.predict_batch(
+                    [f"img_{i:03d}.jpg" for i in range(5)]
+                )
 
                 assert len(predictions) == 5
                 assert predictions[0]["filename"] == "img_000.jpg"
 
-    def test_pipeline_detect_new_classes(self, sample_config, sample_predictions, sample_embeddings):
+    def test_pipeline_detect_new_classes(
+        self, sample_config, sample_predictions, sample_embeddings
+    ):
         """Test new class detection in pipeline."""
         from scripts.auto_annotate.pipeline import AutoAnnotatePipeline
 
         pipeline = AutoAnnotatePipeline(sample_config)
 
-        with patch('hdbscan.HDBSCAN') as mock_hdbscan:
+        # Set predictions and embeddings before calling _detect_new_classes
+        pipeline._predictions = sample_predictions
+        pipeline._embeddings = sample_embeddings
+
+        with patch("hdbscan.HDBSCAN") as mock_hdbscan:
             mock_clusterer = MagicMock()
             mock_clusterer.labels_ = np.array([0, 0, 0, -1, -1])
             mock_clusterer.outlier_scores_ = np.array([0.1, 0.1, 0.1, 0.9, 0.85])
             mock_hdbscan.return_value = mock_clusterer
 
-            new_class_indices = pipeline._detect_new_classes(sample_predictions, sample_embeddings)
+            new_class_indices = pipeline._detect_new_classes()
 
             assert len(new_class_indices) == 2
             assert 3 in new_class_indices
@@ -189,7 +232,9 @@ class TestAutoAnnotatePipeline:
         # Low confidence: < 0.80
         assert len(filtered_result["low_confidence"]) == 2
 
-    def test_pipeline_run_complete(self, sample_config, temp_dirs, sample_predictions, sample_embeddings):
+    def test_pipeline_run_complete(
+        self, sample_config, temp_dirs, sample_predictions, sample_embeddings
+    ):
         """Test running complete pipeline."""
         from scripts.auto_annotate.pipeline import AutoAnnotatePipeline
 
@@ -199,9 +244,10 @@ class TestAutoAnnotatePipeline:
         config["filtered_new_class_dir"] = temp_dirs["new_class"]
         config["filtered_95_dir"] = temp_dirs["filtered_95"]
 
-        with patch('scripts.auto_annotate.model_predictor.YOLO'), \
-             patch('hdbscan.HDBSCAN') as mock_hdbscan:
-
+        with (
+            patch("scripts.auto_annotate.model_predictor.YOLO"),
+            patch("hdbscan.HDBSCAN") as mock_hdbscan,
+        ):
             # Setup HDBSCAN mock
             mock_clusterer = MagicMock()
             mock_clusterer.labels_ = np.array([0, 0, 0, -1, -1])
@@ -212,7 +258,11 @@ class TestAutoAnnotatePipeline:
             pipeline.load_models()
 
             # Mock predictions
-            with patch.object(pipeline.model_predictor, 'predict_batch', return_value=sample_predictions):
+            with patch.object(
+                pipeline.model_predictor,
+                "predict_batch",
+                return_value=sample_predictions,
+            ):
                 result = pipeline.run()
 
                 # Verify result structure
@@ -221,7 +271,9 @@ class TestAutoAnnotatePipeline:
                 assert "high_confidence_count" in result["statistics"]
                 assert "filtered_95_count" in result["statistics"]
 
-    def test_pipeline_saves_prediction_details(self, sample_config, temp_dirs, sample_predictions):
+    def test_pipeline_saves_prediction_details(
+        self, sample_config, temp_dirs, sample_predictions
+    ):
         """Test that pipeline saves prediction details."""
         from scripts.auto_annotate.pipeline import AutoAnnotatePipeline
 
@@ -237,7 +289,7 @@ class TestAutoAnnotatePipeline:
         details_file = Path(temp_dirs["new_class"]) / "prediction_details.json"
         assert details_file.exists()
 
-        with open(details_file, 'r') as f:
+        with open(details_file, "r") as f:
             data = json.load(f)
             assert "predictions" in data
             assert len(data["predictions"]) == 5
@@ -249,10 +301,7 @@ class TestAutoAnnotatePipeline:
         pipeline = AutoAnnotatePipeline(sample_config)
 
         stats = pipeline._calculate_statistics(
-            high_conf_count=10,
-            medium_conf_count=5,
-            low_conf_count=3,
-            new_class_count=2
+            high_conf_count=10, medium_conf_count=5, low_conf_count=3, new_class_count=2
         )
 
         assert stats["total"] == 18
@@ -272,9 +321,10 @@ class TestAutoAnnotatePipeline:
         config["filtered_new_class_dir"] = temp_dirs["new_class"]
         config["filtered_95_dir"] = temp_dirs["filtered_95"]
 
-        with patch('scripts.auto_annotate.model_predictor.YOLO'), \
-             patch('hdbscan.HDBSCAN'):
-
+        with (
+            patch("scripts.auto_annotate.model_predictor.YOLO"),
+            patch("hdbscan.HDBSCAN"),
+        ):
             pipeline = AutoAnnotatePipeline(config)
             pipeline.load_models()
 
@@ -282,13 +332,24 @@ class TestAutoAnnotatePipeline:
             mock_predictions = [
                 {
                     "filename": f"img_{i:03d}.jpg",
-                    "aircraft": {"class_id": 0, "class_name": "Boeing", "confidence": 0.98},
-                    "airline": {"class_id": 2, "class_name": "China Eastern", "confidence": 0.96}
+                    "aircraft": {
+                        "class_id": 0,
+                        "class_name": "Boeing",
+                        "confidence": 0.98,
+                    },
+                    "airline": {
+                        "class_id": 2,
+                        "class_name": "China Eastern",
+                        "confidence": 0.96,
+                    },
+                    "embeddings": np.array([0.1, 0.2, 0.3, 0.4]),
                 }
                 for i in range(5)
             ]
 
-            with patch.object(pipeline.model_predictor, 'predict_batch', return_value=mock_predictions):
+            with patch.object(
+                pipeline.model_predictor, "predict_batch", return_value=mock_predictions
+            ):
                 result = pipeline.run()
 
                 # Check that files were organized
@@ -297,5 +358,7 @@ class TestAutoAnnotatePipeline:
                 assert boeing_dir.exists()
 
                 # Check that details were saved
-                details_file = Path(temp_dirs["filtered_new_class"]) / "prediction_details.json"
+                details_file = (
+                    Path(temp_dirs["new_class"]) / "prediction_details.json"
+                )
                 assert details_file.exists()
