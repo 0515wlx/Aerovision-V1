@@ -31,7 +31,7 @@ image:
     - "*.BMP"
 
   # 默认图片尺寸
-  default_size: 224
+  default_size: 640
 
   # 图片质量
   jpeg_quality: 100

@@ -193,6 +193,14 @@ class DatasetSplitter:
 
         logger.info(f"加载了 {len(df)} 条标注记录")
 
+        if len(df) == 0:
+            logger.error("标注文件为空，无法进行数据集划分！")
+            logger.error("可能的原因:")
+            logger.error("  1. 机型过滤参数不正确（使用了错误的机型名称）")
+            logger.error("  2. 航司过滤参数不正确")
+            logger.error("  3. FGVC数据集中没有符合条件的数据")
+            raise ValueError("标注文件为空，无法进行数据集划分")
+
         return df
 
     def build_class_mapping(self, df: pd.DataFrame, class_column: str = 'typename') -> pd.DataFrame:

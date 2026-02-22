@@ -1,0 +1,101 @@
+# GLM-4V VLM配置文件
+# ⚠️ 重要：相对路径相对于 /training/configs 目录
+
+# GLM API配置
+glm:
+  # 模型名称
+  model: "glm-4.6v"
+
+  # API端点
+  api_url: "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+
+  # 生成参数
+  generation:
+    # 温度参数（0-2，越高越随机）
+    temperature: 0.3
+
+    # 最大生成token数
+    max_tokens: 1024
+
+    # Top-p采样（0-1）
+    top_p: 0.7
+
+    # 频率惩罚（-2到2）
+    frequency_penalty: 0.0
+
+    # 存在惩罚（-2到2）
+    presence_penalty: 0.0
+
+  # 超时配置
+  timeout:
+    # 连接超时（秒）
+    connect: 30
+
+    # 读取超时（秒）
+    read: 120
+
+  # 重试配置
+  retry:
+    # 最大重试次数
+    max_attempts: 3
+
+    # 重试延迟（秒）
+    delay: 1
+
+    # 指数退避因子
+    backoff_factor: 2
+
+# 任务配置
+tasks:
+  # 机型识别
+  aircraft_type:
+    enabled: true
+    default_prompt: "aircraft_type"
+
+  # 航司识别
+  airline:
+    enabled: true
+    default_prompt: "airline"
+
+  # OCR注册号识别
+  registration:
+    enabled: true
+    default_prompt: "registration"
+
+  # 质量评估
+  quality:
+    enabled: true
+    default_prompt: "quality"
+
+# 批处理配置
+batch:
+  # 批量处理大小
+  size: 10
+
+  # 并发请求数
+  concurrent_requests: 3
+
+  # 批处理间隔（毫秒）
+  interval: 100
+
+# 输出配置
+output:
+  # 是否包含原始响应
+  include_raw_response: false
+
+  # 是否包含解析后的内容
+  include_parsed_content: true
+
+  # 是否包含元数据
+  include_metadata: true
+
+# 日志配置
+logging:
+  # 是否记录请求日志
+  log_requests: true
+
+  # 是否记录响应日志
+  log_responses: true
+
+  # 日志级别
+  level: "INFO"

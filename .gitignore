@@ -216,7 +216,7 @@ training/model/
 training/logs/
 
 # Datasets
-/FGVC_Aircraft_dataset/
+/FGVC_Aircraft/
 data
 checkpoints
 runs
@@ -226,3 +226,10 @@ training/configs/aircraft_classify.yaml
 /training/scripts/logs/
 /training/ckpt/
 /training/output/
+.aider*
+/logs
+results
+training/test_results/
+
+.dvc
+/auto_annotate_output/
