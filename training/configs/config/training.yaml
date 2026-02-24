@@ -31,14 +31,9 @@ training:
 
     # Focal Loss（解决类别不平衡）
     focal_loss:
-      enabled: false
+      enabled: true
       alpha: 0.25
-      gamma: 2.0
-
-    # Mixup 数据增强
-    mixup:
-      enabled: false
-      alpha: 0.2
+      gamma: 4.0
 
     # ElasticFace Loss（基于动态 margin 的角度损失）
     elastic_face:
@@ -49,6 +44,78 @@ training:
       m: 0.30            # 基础 margin (YOLO-adapted, 原论文推荐 0.50)
       std: 0.01          # margin 采样标准差 (YOLO-adapted, 原论文推荐 0.0125)
       plus: true        # 是否启用 ElasticArcFace+ (自适应 margin)
+
+  # ========================================
+  # YOLOv8 原生数据增强参数
+  # ========================================
+  augmentation:
+    # HSV 色彩增强（光照变化鲁棒性）
+    hsv:
+      h: 0.015      # Hue 变化范围 (0.0-1.0)
+      s: 0.7        # Saturation 变化范围 (0.0-1.0)
+      v: 0.4        # Value (亮度) 变化范围 (0.0-1.0)
+
+    # 几何变换
+    degrees: 0.0       # 旋转角度范围 (+/- degrees)
+    translate: 0.1     # 平移比例 (0.0-1.0)
+    scale: 0.5         # 缩放增益 (0.0-1.0, e.g. 0.5 = 50%-150%)
+    shear: 0.0         # 剪切角度 (+/- degrees)
+    perspective: 0.0   # 透视变换因子 (0.0-0.001)
+
+    # 翻转
+    flipud: 0.0        # 垂直翻转概率 (0.0-1.0)
+    fliplr: 0.5        # 水平翻转概率 (0.0-1.0)
+    bgr: 0.0           # RGB↔BGR 通道交换概率 (0.0-1.0)
+
+    # 复合增强
+    mosaic: 1.0        # Mosaic 增强概率 (0.0-1.0)
+    mixup: 0.0         # MixUp 增强概率 (0.0-1.0) ⚠️ 注意：这是 YOLO 原生的 mixup 参数
+    cutmix: 0.0        # CutMix 增强概率 (0.0-1.0)
+    copy_paste: 0.0    # Copy-Paste 增强概率 (仅检测任务, 0.0-1.0)
+    copy_paste_mode: flip # Copy-Paste 模式: flip 或 mixup
+
+    # Mosaic 控制
+    close_mosaic: 10   # 关闭 Mosaic 的 epoch 数 (0=保持开启)
+
+    # Mosaic 边界
+    border: [0, 0]     # Mosaic 边界大小 (y, x)
+
+  # ========================================
+  # 其他训练策略
+  # ========================================
+  training_strategies:
+    # 多尺度训练
+    multi_scale: 0.0    # 多尺度范围 (0.0=禁用, 0.0-1.0)
+
+    # 矩形批次（仅检测任务）
+    rect: false         # 矩形批次 (false=方形批次)
+
+    # 数据集使用比例
+    fraction: 1.0      # 使用训练数据集的比例 (1.0=全部)
+
+    # 性能分析
+    profile: false      # profile ONNX/TensorRT 速度 (false=禁用)
+
+    # torch.compile() 优化
+    compile: false       # 启用 torch.compile() (false=禁用)
+
+    # 单类别训练
+    single_cls: false   # 将所有类别视为单个类别
+
+    # 冻结层数
+    freeze: null        # 冻结前 N 层或特定层索引列表
+
+    # 自动增强策略（仅分类任务）
+    auto_augment: randaugment  # 自动增强: randaugment, autoaugment, augmix
+
+    # 随机擦除（仅分类任务）
+    erasing: 0.4        # 随机擦除概率 (0.0-1.0)
+
+    # 缓存图像
+    cache: false        # 缓存图像: false, true(ram), 'disk'
+
+    # 确定性操作
+    deterministic: true # 启用确定性操作 (可复现但可能较慢)
 
   # 模型配置
   model:
@@ -76,6 +143,12 @@ training:
 
     # 最终学习率衰减比例 (final_lr = lr0 * lrf)
     lrf: 0.01
+
+    # Warmup 初始动量
+    warmup_momentum: 0.8
+
+    # Warmup 期间的 bias 学习率
+    warmup_bias_lr: 0.1
 
   # 正则化
   regularization:

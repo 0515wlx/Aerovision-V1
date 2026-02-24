@@ -44,7 +44,6 @@ from configs import load_config
 from training_utils import (
     FocalLoss,
     ConfidencePenalty,
-    Mixup,
     CombinedLoss,
     apply_gradient_accumulation,
     ElasticFaceArcFace,
@@ -192,6 +191,18 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--warmup-epochs", type=float, default=3.0, help="Warmup epochs"
     )
+    parser.add_argument(
+        "--warmup-momentum",
+        type=float,
+        default=0.8,
+        help="Initial momentum during warmup",
+    )
+    parser.add_argument(
+        "--warmup-bias-lr",
+        type=float,
+        default=0.1,
+        help="Bias learning rate during warmup",
+    )
 
     # Device and performance
     parser.add_argument(
@@ -297,18 +308,6 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "--focal-gamma", type=float, default=2.0, help="Focal Loss gamma parameter"
-    )
-    parser.add_argument(
-        "--mixup",
-        action="store_true",
-        default=False,
-        help="Use Mixup data augmentation",
-    )
-    parser.add_argument(
-        "--mixup-alpha",
-        type=float,
-        default=0.4,
-        help="Mixup alpha parameter for Beta distribution",
     )
 
     # ElasticFace loss arguments
@@ -506,15 +505,6 @@ class AircraftClassifierTrainer:
                 f"Focal Loss enabled: alpha={self.focal_alpha}, gamma={self.focal_gamma}"
             )
 
-        # Mixup
-        self.use_mixup = self.config.get("mixup", False)
-        self.mixup_alpha = self.config.get("mixup_alpha", 0.4)
-        if self.use_mixup:
-            self.mixup = Mixup(alpha=self.mixup_alpha)
-            self.logger.info(f"Mixup enabled: alpha={self.mixup_alpha}")
-        else:
-            self.mixup = None
-
         # ElasticFace Loss
         self.use_elastic_face = self.config.get("elastic_face", False)
         self.elastic_lambda = self.config.get("elastic_lambda", 0.5)
@@ -708,6 +698,8 @@ class AircraftClassifierTrainer:
             "dropout": self.config["dropout"],
             "patience": self.config["patience"],
             "warmup_epochs": self.config["warmup_epochs"],
+            "warmup_momentum": self.config.get("warmup_momentum", 0.8),
+            "warmup_bias_lr": self.config.get("warmup_bias_lr", 0.1),
             "device": self.config["device"],
             "workers": self.config["workers"],
             "amp": self.config["amp"],
@@ -719,6 +711,75 @@ class AircraftClassifierTrainer:
             "plots": self.config["plots"],
             "verbose": True,
         }
+
+        # Add data augmentation parameters
+        aug_config = self.config.get("augmentation", {})
+        self.logger.info(f"Loaded augmentation config: {aug_config}")
+        if aug_config:
+            # HSV augmentation
+            train_args["hsv_h"] = aug_config.get("hsv", {}).get("h", 0.015)
+            train_args["hsv_s"] = aug_config.get("hsv", {}).get("s", 0.7)
+            train_args["hsv_v"] = aug_config.get("hsv", {}).get("v", 0.4)
+
+            # Geometric transformations
+            train_args["degrees"] = aug_config.get("degrees", 0.0)
+            train_args["translate"] = aug_config.get("translate", 0.1)
+            train_args["scale"] = aug_config.get("scale", 0.5)
+            train_args["shear"] = aug_config.get("shear", 0.0)
+            train_args["perspective"] = aug_config.get("perspective", 0.0)
+
+            # Flips
+            train_args["flipud"] = aug_config.get("flipud", 0.0)
+            train_args["fliplr"] = aug_config.get("fliplr", 0.5)
+            train_args["bgr"] = aug_config.get("bgr", 0.0)
+
+            # Composite augmentations
+            train_args["mosaic"] = aug_config.get("mosaic", 1.0)
+            train_args["mixup"] = aug_config.get("mixup", 0.0)  # YOLO native mixup!
+            train_args["cutmix"] = aug_config.get("cutmix", 0.0)
+            # Note: copy_paste is NOT supported for classification (only detection)
+
+            # Mosaic control
+            train_args["close_mosaic"] = aug_config.get("close_mosaic", 10)
+
+        # Log augmentation parameters being passed to YOLO
+        # Note: 'border', 'copy_paste', 'copy_paste_mode' are NOT supported for classification
+        aug_params = {k: v for k, v in train_args.items() if k in [
+            "hsv_h", "hsv_s", "hsv_v", "degrees", "translate", "scale",
+            "shear", "perspective", "flipud", "fliplr", "bgr",
+            "mosaic", "mixup", "cutmix", "close_mosaic"
+        ]}
+        if aug_params:
+            self.logger.info(f"Augmentation parameters passed to YOLO: {aug_params}")
+        else:
+            self.logger.warning("No augmentation parameters found in config!")
+
+        # Add training strategy parameters
+        strategy_config = self.config.get("training_strategies", {})
+        self.logger.info(f"Loaded training strategies config: {strategy_config}")
+        if strategy_config:
+            train_args["multi_scale"] = strategy_config.get("multi_scale", 0.0)
+            # Note: 'rect' is NOT supported for classification (only detection)
+            train_args["fraction"] = strategy_config.get("fraction", 1.0)
+            train_args["profile"] = strategy_config.get("profile", False)
+            train_args["compile"] = strategy_config.get("compile", False)
+            train_args["single_cls"] = strategy_config.get("single_cls", False)
+            train_args["freeze"] = strategy_config.get("freeze")
+            train_args["auto_augment"] = strategy_config.get("auto_augment", "randaugment")
+            train_args["erasing"] = strategy_config.get("erasing", 0.4)
+            train_args["cache"] = strategy_config.get("cache", False)
+            train_args["deterministic"] = strategy_config.get("deterministic", True)
+
+        # Log training strategy parameters being passed to YOLO
+        # Note: 'rect' is NOT supported for classification (only detection)
+        strategy_params = {k: v for k, v in train_args.items() if k in [
+            "multi_scale", "fraction", "profile", "compile",
+            "single_cls", "freeze", "auto_augment", "erasing", "cache", "deterministic"
+        ]}
+        if strategy_params:
+            self.logger.info(f"Training strategy parameters passed to YOLO: {strategy_params}")
+        else:
+            self.logger.warning("No training strategy parameters found in config!")
 
         # Start training
         self.logger.info("Starting training...")
@@ -906,6 +967,12 @@ def main() -> None:
         "warmup_epochs": config_obj.get("training.warmup.epochs")
         or args.warmup_epochs
         or 3.0,
+        "warmup_momentum": config_obj.get("training.scheduler.warmup_momentum")
+        or args.warmup_momentum
+        or 0.8,
+        "warmup_bias_lr": config_obj.get("training.scheduler.warmup_bias_lr")
+        or args.warmup_bias_lr
+        or 0.1,
         # Device
         "device": config_obj.get("device.default") or args.device or "0",
         "workers": config_obj.get("training.workers") or args.workers or 8,
@@ -962,12 +1029,6 @@ def main() -> None:
         "focal_gamma": config_obj.get("training.advanced.focal_loss.gamma")
         or args.focal_gamma
         or 2.0,
-        "mixup": config_obj.get("training.advanced.mixup.enabled")
-        if config_obj.get("training.advanced.mixup.enabled") is not None
-        else args.mixup,
-        "mixup_alpha": config_obj.get("training.advanced.mixup.alpha")
-        or args.mixup_alpha
-        or 0.4,
         # ElasticFace loss configuration
         "elastic_face": config_obj.get("training.advanced.elastic_face.enabled")
         if config_obj.get("training.advanced.elastic_face.enabled") is not None
@@ -990,6 +1051,10 @@ def main() -> None:
         "elastic_type": config_obj.get("training.advanced.elastic_face.type")
         if config_obj.get("training.advanced.elastic_face.type") is not None
         else args.elastic_type,
+        # Data augmentation configuration
+        "augmentation": config_obj.get("training.augmentation") or {},
+        # Training strategies configuration
+        "training_strategies": config_obj.get("training.training_strategies") or {},
     }
 
     # Helper function to resolve config paths
